@@ -46,14 +46,20 @@ def read_mfc_with_keys(tag, keysA):
     blocks = []
     raw = bytearray()
 
+    # l'oggetto tag potrebbe non esporre le API MIFARE Classic; in quel caso
+    # usiamo direttamente l'interfaccia del frontend (clf.exchange)
+    clf = getattr(tag, "clf", getattr(tag, "_clf", None))
+    uid = getattr(tag, "identifier", b"")
+
     for blk in range(64):
         sector = blk // 4
         keyA = keysA[sector] if sector < len(keysA) else None
         if keyA is None:
             continue
 
-        # autenticazione per il blocco corrente
         auth_ok = False
+
+        # 1) API alte se disponibili
         if hasattr(tag, "authenticate"):
             try:
                 auth_ok = bool(tag.authenticate(blk, keyA, 0x60))
@@ -64,17 +70,38 @@ def read_mfc_with_keys(tag, keysA):
                 auth_ok = bool(tag.classic_auth_a(blk, keyA))
             except Exception:
                 pass
+
+        # 2) fallback a scambio raw via PN532
+        if not auth_ok and clf is not None and uid:
+            try:
+                cmd = bytearray([0x60, blk]) + keyA + uid[:4]
+                rsp = clf.exchange(cmd)
+                auth_ok = bool(rsp and rsp[0] == 0x00)
+            except Exception:
+                pass
         if not auth_ok:
             continue
 
-        # lettura del blocco
-        try:
-            data = tag.read(blk) if hasattr(tag, "read") else tag.read_block(blk)
-            if len(data) == 16:
-                blocks.append({"index": blk, "data": data.hex().upper()})
-                raw.extend(data)
-        except Exception:
-            pass
+        data = None
+        if hasattr(tag, "read"):
+            try:
+                data = tag.read(blk)
+            except Exception:
+                data = None
+        if data is None and hasattr(tag, "read_block"):
+            try:
+                data = tag.read_block(blk)
+            except Exception:
+                data = None
+        if data is None and clf is not None:
+            try:
+                data = clf.exchange(bytearray([0x30, blk]))
+            except Exception:
+                data = None
+
+        if isinstance(data, (bytes, bytearray)) and len(data) == 16:
+            blocks.append({"index": blk, "data": data.hex().upper()})
+            raw.extend(data)
 
     return blocks, bytes(raw)
 

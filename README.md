@@ -72,6 +72,15 @@ Oltre al file JSON vengono generati:
 
 Questi file aiutano a verificare eventuali problemi di lettura o decodifica.
 
+Per decodificare ulteriormente il file `.bin`, utilizza lo script dedicato:
+
+```bash
+python src/bambutag_parse.py bambu_tag_YYYYMMDD_HHMMSS.bin
+```
+
+Lo script stamperà a schermo le informazioni interpretate dalla tag, come tipo
+di materiale, colore e peso della bobina.
+
 
 Esempio `bambu_tag_20250910_123456.json`:
 ```json

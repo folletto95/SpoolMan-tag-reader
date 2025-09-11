@@ -10,7 +10,6 @@ from parser import parse_blocks
 
 OUTPUT_FILE = f"bambu_tag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 
-
 def detect_device():
     """Try to auto-detect an NFC reader.
 
@@ -22,8 +21,9 @@ def detect_device():
     serial_globs = ("/dev/ttyUSB*", "/dev/ttyACM*")
     for pattern in serial_globs:
         for dev in glob.glob(pattern):
-            name = os.path.basename(dev)
-            candidates.append(f"tty:{name}:pn532")
+            # nfcpy expects port names without the 'tty' prefix, e.g. USB0
+            port = os.path.basename(dev).replace("tty", "")
+            candidates.append(f"tty:{port}:pn532")
 
     for dev in candidates:
         try:
@@ -32,8 +32,7 @@ def detect_device():
         except Exception:
             continue
     return None
-  
-  
+
 def on_connect(tag):
     print(f"[INFO] Tag trovato: {tag}")
     dump_data = {}

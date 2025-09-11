@@ -30,7 +30,8 @@ Esegui il lettore (rilevamento automatico):
 python src/reader.py
 ```
 Il programma proverà a individuare un lettore NFC collegato via USB o
-seriale (`/dev/ttyUSB*`).
+seriale (`/dev/ttyUSB*` o `/dev/ttyACM*`).
+
 
 Per specificare manualmente il dispositivo:
 ```bash

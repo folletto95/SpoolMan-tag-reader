@@ -3,7 +3,7 @@ import sys, time, json, binascii
 import nfc
 
 # importa il KDF della repo
-from src.thirdparty.deriveKeys import derive_keys  # <-- usa il nome reale della funzione in deriveKeys.py
+from thirdparty.deriveKeys import derive_keys  # <-- usa il nome reale della funzione in deriveKeys.py
 # se il nome differisce (es. derive_from_uid), adegua la riga sopra.
 
 def keylist_from_uid(uid_hex: str):

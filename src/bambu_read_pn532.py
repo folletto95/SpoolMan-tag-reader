@@ -5,6 +5,8 @@ import nfc
 
 # importa il KDF ufficiale
 from src.thirdparty.deriveKeys import kdf
+from src.bambutag_parse import Tag as BambuTag
+from src.spoolman_formatter import tag_to_spoolman_payload
 
 
 def keylist_from_uid(uid_hex: str):
@@ -104,15 +106,15 @@ def on_connect(tag):
     with open(base + ".json", "w") as f:
         json.dump({"uid": uid_hex, "blocks": blocks}, f, indent=2)
 
-    # prova decodifica (se hai parser.py)
+    # estrai i dati con il parser ufficiale e prepara il payload per Spoolman
     try:
-        from src.parser import parse_blocks
-        parsed = parse_blocks(blocks)
-        with open(base + ".parsed.json", "w") as f:
-            json.dump(parsed, f, indent=2)
-        print(f"[OK] Parsed salvato in {base}.parsed.json")
+        tag_obj = BambuTag(base + ".bin", raw)
+        spoolman_data = tag_to_spoolman_payload(tag_obj)
+        with open(base + ".spoolman.json", "w") as f:
+            json.dump(spoolman_data, f, indent=2)
+        print(f"[OK] Dati Spoolman salvati in {base}.spoolman.json")
     except Exception as e:
-        print(f"[WARN] parse_blocks fallito: {e}")
+        print(f"[WARN] Impossibile estrarre dati Spoolman: {e}")
 
     # se vuoi leggere più tag nella stessa sessione, ritorna True
     return True

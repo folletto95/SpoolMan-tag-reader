@@ -3,37 +3,49 @@
 from __future__ import annotations
 
 import binascii
-import json
+import struct
 from typing import Any, Dict, List
 
 
+def _to_ascii(data: bytes) -> str:
+    return data.decode("ascii", errors="ignore").replace("\x00", "").strip()
+
+
+def _le16(data: bytes) -> int:
+    return int.from_bytes(data, "little")
+
+
+def _lefloat(data: bytes) -> float:
+    return struct.unpack("<f", data)[0]
+
+
 def parse_blocks(blocks: List[Dict[str, str]]) -> Dict[str, Any]:
-    """Decodifica le informazioni della bobina da un dump di blocchi.
+    """Decodifica alcuni campi noti dai blocchi della tag Bambu."""
 
-    I tag delle bobine BambuLab salvano un payload JSON nella memoria
-    utente. Questa funzione ricostruisce i byte grezzi, estrae il testo
-    ASCII e prova a interpretarlo come JSON. In caso di successo vengono
-    restituiti i campi principali; altrimenti viene ritornato l'esadecimale
-    originale.
-    """
+    block_bytes = {b["index"]: binascii.unhexlify(b["data"]) for b in blocks}
+    raw_hex = "".join(b["data"] for b in blocks).lower()
+    parsed: Dict[str, Any] = {"raw_hex": raw_hex}
 
-    raw_bytes = b"".join(binascii.unhexlify(b["data"]) for b in blocks)
-    text = bytes(b for b in raw_bytes if 32 <= b <= 126)
-
-    parsed: Dict[str, Any] = {"raw_hex": binascii.hexlify(raw_bytes).decode("ascii")}
     try:
-        info = json.loads(text.decode("ascii"))
-    except Exception:
-        return parsed
+        b = block_bytes
+        parsed.update(
+            {
+                "variant_id": _to_ascii(b[1][0:8]),
+                "material_id": _to_ascii(b[1][8:16]),
+                "filament_type": _to_ascii(b[2]),
+                "detailed_filament_type": _to_ascii(b[4]),
+                "color": "#" + binascii.hexlify(b[5][0:4]).decode().upper(),
+                "spool_weight_g": _le16(b[5][4:6]),
+                "filament_diameter_mm": round(_lefloat(b[5][8:12]), 2),
+                "spool_width_mm": _le16(b[10][4:6]) / 100,
+                "production_date": _to_ascii(b[12]),
+                "filament_length_m": _le16(b[14][4:6]),
+            }
+        )
+    except KeyError:
+        # Mancano blocchi necessari per il parsing completo
+        pass
 
-    parsed.update(
-        {
-            "spool_id": str(info.get("spool_id", "unknown")),
-            "material": info.get("material"),
-            "color": info.get("color"),
-            "weight_grams": info.get("weight_grams"),
-        }
-    )
     return parsed
 
 

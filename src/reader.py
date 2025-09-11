@@ -4,6 +4,7 @@ import os
 import nfc
 import json
 import binascii
+import string
 from datetime import datetime
 
 from parser import parse_blocks
@@ -42,8 +43,21 @@ def on_connect(tag):
     dump_data["uid"] = binascii.hexlify(tag.identifier).decode()
 
     blocks = []
-    # Prova prima a leggere i blocchi grezzi
-    if hasattr(tag, "read"):
+    # Usa tag.dump() per ottenere blocchi da 16 byte e convertirli in esadecimale
+    if hasattr(tag, "dump"):
+        hexdigits = set(string.hexdigits)
+        for idx, line in enumerate(tag.dump()):
+            if isinstance(line, bytes):
+                block_hex = binascii.hexlify(line).decode().upper()
+            else:
+                hex_chars = "".join(ch for ch in line if ch in hexdigits)
+                if len(hex_chars) < 32:
+                    continue
+                block_hex = hex_chars[:32].upper()
+            blocks.append({"index": idx, "data": block_hex})
+
+    # Se dump() non è disponibile, prova la lettura grezza pagina per pagina
+    if not blocks and hasattr(tag, "read"):
         page = 0
         while True:
             try:
@@ -52,28 +66,13 @@ def on_connect(tag):
                 break
             if not data:
                 break
-            for offset in range(0, len(data), 4):
-                block = data[offset : offset + 4]
-                block_hex = binascii.hexlify(block).decode()
-                blocks.append({"index": page + offset // 4, "data": block_hex})
+            for offset in range(0, len(data), 16):
+                block = data[offset : offset + 16]
+                if len(block) < 16:
+                    break
+                block_hex = binascii.hexlify(block).decode().upper()
+                blocks.append({"index": page + offset // 16, "data": block_hex})
             page += 4
-
-    # Se la lettura diretta fallisce, ripiega su dump() e filtra le righe utili
-    if not blocks and hasattr(tag, "dump"):
-        for line in tag.dump():
-            if isinstance(line, bytes):
-                block = line[:4]
-                block_hex = binascii.hexlify(block).decode()
-                index = len(blocks)
-                blocks.append({"index": index, "data": block_hex})
-                continue
-
-            # Per le stringhe estrai solo i caratteri esadecimali e ignora altro
-            hex_chars = "".join(ch for ch in line if ch in "0123456789abcdefABCDEF")
-            if len(hex_chars) < 8:
-                continue
-            block_hex = hex_chars[:8]
-            blocks.append({"index": len(blocks), "data": block_hex})
 
     dump_data["blocks"] = blocks
     dump_data["parsed"] = parse_blocks(blocks)

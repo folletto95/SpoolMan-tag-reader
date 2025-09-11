@@ -76,7 +76,6 @@ def decode_bambu_tag(tag: nfc.tag.Tag) -> SpoolInfo:
     )
 
 
-
 def post_to_spoolman(info: SpoolInfo, url: str) -> None:
     """Post decoded info to SpoolMan."""
     payload = {
@@ -118,3 +117,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    

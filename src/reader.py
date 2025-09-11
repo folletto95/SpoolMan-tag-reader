@@ -1,17 +1,16 @@
 import argparse
 import glob
 import os
+import re
+import time
+
 import nfc
 import json
 import binascii
-import string
-from datetime import datetime
 
 from parser import parse_blocks
 
-OUTPUT_FILE = f"bambu_tag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-RAW_FILE = OUTPUT_FILE.replace(".json", ".bin")
-DUMP_FILE = OUTPUT_FILE.replace(".json", ".dump.txt")
+HEX2 = re.compile(r"(?i)\b[0-9a-f]{2}\b")
 
 
 def detect_device():
@@ -38,110 +37,107 @@ def detect_device():
             continue
     return None
 
-def on_connect(tag):
-    print(f"[INFO] Tag trovato: {tag}")
-    dump_data = {}
 
-    # UID
-    dump_data["uid"] = binascii.hexlify(tag.identifier).decode()
+def robust_dump(tag):
+    """Return (blocks, raw_bytes, dump_lines) from an NFC tag.
 
+    Tries to read Type2 tags via ``read_pages`` when available, otherwise
+    falls back to parsing the generic ``dump()`` output. ``blocks`` is a list
+    of ``{"index": int, "data": HEX16}`` dictionaries, where ``HEX16`` is
+    a 32-character uppercase hex string. ``raw_bytes`` contains all bytes
+    concatenated in the order read. ``dump_lines`` contains the raw lines from
+    ``tag.dump()`` for troubleshooting.
+    """
     blocks = []
-    # Leggi la memoria del tag 16 byte per volta usando read()
-    if hasattr(tag, "read"):
-        page = 0
-        while True:
-            try:
-                data = tag.read(page)
-            except Exception:
-                break
-            if not data:
-                break
-            block_hex = binascii.hexlify(data).decode().upper()
-            blocks.append({"index": page // 4, "data": block_hex})
-            page += 4
-    # In mancanza di read(), prova con dump() raggruppando ogni 16 byte
-    elif hasattr(tag, "dump"):
-        hexdigits = set(string.hexdigits)
-        buffer = ""
-        idx = 0
-        for line in tag.dump():
-            hex_chars = "".join(ch for ch in line if ch in hexdigits)
-            buffer += hex_chars.upper()
-            while len(buffer) >= 32:
-                blocks.append({"index": idx, "data": buffer[:32]})
-                buffer = buffer[32:]
+    raw = bytearray()
+
+    # 1) Prefer Type2 tags with read_pages (16 bytes per call)
+    try:
+        if hasattr(tag, "read_pages"):
+            idx = 0
+            page = 0
+            while True:
+                try:
+                    data = tag.read_pages(page)
+                except Exception:
+                    break
+                if not data or len(data) != 16:
+                    break
+                raw.extend(data)
+                blocks.append({"index": idx, "data": data.hex().upper()})
                 idx += 1
+                page += 4
+            if blocks:
+                return blocks, bytes(raw), []
+    except Exception:
+        pass
 
-    # Se la lettura diretta non ha prodotto dati, prova con dump()
-    if not blocks and hasattr(tag, "dump"):
-        print("[WARN] Lettura diretta fallita, uso dump()")
-        hexdigits = set(string.hexdigits)
-        buffer = ""
-        idx = 0
-        for line in tag.dump():
-            hex_chars = "".join(ch for ch in line if ch in hexdigits)
-            buffer += hex_chars.upper()
-            while len(buffer) >= 32:
-                blocks.append({"index": idx, "data": buffer[:32]})
-                buffer = buffer[32:]
-                idx += 1
+    # 2) Fallback: parse output of dump()
+    try:
+        lines = tag.dump()
+    except Exception:
+        lines = []
 
-    # Prova comunque a catturare l'output di dump() per eventuali blocchi mancanti
-    dump_lines = []
-    seen = {b["index"] for b in blocks}
-    if hasattr(tag, "dump"):
-        hexdigits = set(string.hexdigits)
-        buffer = ""
-        idx = 0
-        for line in tag.dump():
-            dump_lines.append(line.rstrip())
-            hex_chars = "".join(ch for ch in line if ch in hexdigits)
-            buffer += hex_chars.upper()
-            while len(buffer) >= 32:
-                if idx not in seen:
-                    blocks.append({"index": idx, "data": buffer[:32]})
-                    seen.add(idx)
-                buffer = buffer[32:]
-                idx += 1
-    if dump_lines:
-        with open(DUMP_FILE, "w") as df:
-            df.write("\n".join(dump_lines))
+    dump_lines = [str(ln) for ln in lines]
+    bytes_seq = bytearray()
+    for ln in lines:
+        if isinstance(ln, (bytes, bytearray)):
+            bytes_seq.extend(ln)
+        else:
+            for m in HEX2.finditer(str(ln)):
+                bytes_seq.append(int(m.group(0), 16))
 
-    dump_data["blocks"] = sorted(blocks, key=lambda b: b["index"])
+    if not bytes_seq:
+        return [], b"", dump_lines
 
-    # Salva anche i dati grezzi concatenati per analisi successive
-    raw_bytes = b"".join(
-        binascii.unhexlify(b["data"]) for b in blocks if len(b["data"]) % 2 == 0
-    )
-    with open(RAW_FILE, "wb") as rf:
-        rf.write(raw_bytes)
+    raw = bytes(bytes_seq)
+    for i in range(0, len(raw), 16):
+        chunk = raw[i : i + 16]
+        if len(chunk) < 16:
+            break
+        blocks.append({"index": i // 16, "data": chunk.hex().upper()})
+
+    return blocks, raw, dump_lines
+
+
+def on_connect(tag):
+    print(f"[INFO] Tag: {tag}  UID: {getattr(tag, 'identifier', b'').hex() if hasattr(tag, 'identifier') else 'n/a'}")
+
+    blocks, raw_bytes, dump_lines = robust_dump(tag)
+    print(f"[INFO] Blocchi estratti: {len(blocks)}  Bytes totali: {len(raw_bytes)}")
+
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    base = f"bambu_tag_{ts}"
+    raw_file = base + ".bin"
+    dump_file = base + ".dump.txt"
+
     if raw_bytes:
-        print(f"[INFO] Dati grezzi salvati in {RAW_FILE}")
+        with open(raw_file, "wb") as rf:
+            rf.write(raw_bytes)
+        print(f"[INFO] Dati grezzi salvati in {raw_file}")
     else:
-        print(f"[WARN] Nessun dato grezzo ottenuto, file vuoto {RAW_FILE}")
+        print(f"[WARN] Nessun dato grezzo salvato (dump vuoto)")
 
-    parsed = parse_blocks(dump_data["blocks"])
+    if dump_lines:
+        with open(dump_file, "w") as df:
+            df.write("\n".join(dump_lines))
+        print(f"[INFO] Dump testuale salvato in {dump_file}")
 
-    dump_data["parsed"] = parsed
-    if parsed:
-        print(f"[INFO] Decodificato: {parsed}")
-    else:
-        print("[WARN] Nessun dato decodificato. Controlla il file grezzo per analisi.")
+    out_json = {
+        "uid": getattr(tag, "identifier", b"").hex(),
+        "blocks": blocks,
+    }
 
-    # Avvisa se il primo blocco non contiene il UID atteso
-    if dump_data["blocks"]:
-        first_block = dump_data["blocks"][0]["data"].upper()
-        if not first_block.startswith(dump_data["uid"].upper()):
-            print(
-                "[WARN] Il primo blocco non coincide con l'UID: possibile lettura errata."
-            )
+    try:
+        out_json["parsed"] = parse_blocks(blocks)
+    except Exception as e:
+        print(f"[WARN] parse_blocks fallito: {e}")
 
+    json_file = base + ".json"
+    with open(json_file, "w") as f:
+        json.dump(out_json, f, indent=2)
+    print(f"[INFO] JSON salvato in {json_file}")
 
-    # Salva su file JSON
-    with open(OUTPUT_FILE, "w") as f:
-        json.dump(dump_data, f, indent=2)
-
-    print(f"[INFO] Dump salvato in {OUTPUT_FILE}")
     return True
 
 def main():

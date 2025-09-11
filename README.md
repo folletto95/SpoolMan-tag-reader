@@ -53,6 +53,10 @@ Appoggia una bobina Bambu sul lettore. Verrà generato un file JSON con:
 
 ## 📂 Output
 
+Oltre al file JSON viene generato anche `bambu_tag_YYYYMMDD_HHMMSS.bin` con i
+dati grezzi concatenati della tag, utile per verificare eventuali problemi di
+decodifica.
+
 Esempio `bambu_tag_20250910_123456.json`:
 ```json
 {

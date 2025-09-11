@@ -10,6 +10,7 @@ from datetime import datetime
 from parser import parse_blocks
 
 OUTPUT_FILE = f"bambu_tag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+RAW_FILE = OUTPUT_FILE.replace(".json", ".bin")
 
 def detect_device():
     """Try to auto-detect an NFC reader.
@@ -43,21 +44,8 @@ def on_connect(tag):
     dump_data["uid"] = binascii.hexlify(tag.identifier).decode()
 
     blocks = []
-    # Usa tag.dump() per ottenere blocchi da 16 byte e convertirli in esadecimale
-    if hasattr(tag, "dump"):
-        hexdigits = set(string.hexdigits)
-        for idx, line in enumerate(tag.dump()):
-            if isinstance(line, bytes):
-                block_hex = binascii.hexlify(line).decode().upper()
-            else:
-                hex_chars = "".join(ch for ch in line if ch in hexdigits)
-                if len(hex_chars) < 32:
-                    continue
-                block_hex = hex_chars[:32].upper()
-            blocks.append({"index": idx, "data": block_hex})
-
-    # Se dump() non è disponibile, prova la lettura grezza pagina per pagina
-    if not blocks and hasattr(tag, "read"):
+    # Leggi la memoria del tag 16 byte per volta usando read()
+    if hasattr(tag, "read"):
         page = 0
         while True:
             try:
@@ -66,17 +54,36 @@ def on_connect(tag):
                 break
             if not data:
                 break
-            for offset in range(0, len(data), 16):
-                block = data[offset : offset + 16]
-                if len(block) < 16:
-                    break
-                block_hex = binascii.hexlify(block).decode().upper()
-                blocks.append({"index": page + offset // 16, "data": block_hex})
+            block_hex = binascii.hexlify(data).decode().upper()
+            blocks.append({"index": page // 4, "data": block_hex})
             page += 4
+    # In mancanza di read(), prova con dump() raggruppando ogni 16 byte
+    elif hasattr(tag, "dump"):
+        hexdigits = set(string.hexdigits)
+        buffer = ""
+        idx = 0
+        for line in tag.dump():
+            hex_chars = "".join(ch for ch in line if ch in hexdigits)
+            buffer += hex_chars.upper()
+            while len(buffer) >= 32:
+                blocks.append({"index": idx, "data": buffer[:32]})
+                buffer = buffer[32:]
+                idx += 1
 
     dump_data["blocks"] = blocks
-    dump_data["parsed"] = parse_blocks(blocks)
-    print(f"[INFO] Decodificato: {dump_data['parsed']}")
+
+    # Salva anche i dati grezzi concatenati per analisi successive
+    raw_bytes = b"".join(binascii.unhexlify(b["data"]) for b in blocks if len(b["data"]) % 2 == 0)
+    with open(RAW_FILE, "wb") as rf:
+        rf.write(raw_bytes)
+    print(f"[INFO] Dati grezzi salvati in {RAW_FILE}")
+
+    parsed = parse_blocks(blocks)
+    dump_data["parsed"] = parsed
+    if parsed:
+        print(f"[INFO] Decodificato: {parsed}")
+    else:
+        print("[WARN] Nessun dato decodificato. Controlla il file grezzo per analisi.")
 
     # Salva su file JSON
     with open(OUTPUT_FILE, "w") as f:

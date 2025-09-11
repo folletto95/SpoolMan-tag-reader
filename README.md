@@ -2,6 +2,7 @@
 
 A simple Python utility to read the NFC tag attached to BambuLab filament spools and publish the decoded information to a [SpoolMan](https://github.com/Donkie/Spoolman) instance. The reader interface and API URL are configurable so the script works across different Linux distributions.
 
+
 ## Requirements
 
 * [nfcpy](https://nfcpy.readthedocs.io/) for accessing the PN532 reader

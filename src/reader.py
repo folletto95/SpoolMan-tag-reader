@@ -90,6 +90,24 @@ def robust_dump(tag):
     return blocks, raw_bytes, dump_lines
 
 
+    if not bytes_seq:
+        return [], b"", dump_lines
+
+    raw = bytes(bytes_seq)
+    for i in range(0, len(raw), 16):
+        chunk = raw[i : i + 16]
+        if len(chunk) < 16:
+            break
+        blocks.append({"index": i // 16, "data": chunk.hex().upper()})
+
+    return blocks, raw, dump_lines
+
+
+def on_connect(tag):
+    print(
+        f"[INFO] Tag: {tag}  UID: {getattr(tag, 'identifier', b'').hex() if hasattr(tag, 'identifier') else 'n/a'}"
+    )
+
 def on_connect(tag):
     print(f"[INFO] Tag trovato: {tag}")
     blocks, raw_bytes, dump_lines = robust_dump(tag)
@@ -114,6 +132,7 @@ def on_connect(tag):
         print(f"[INFO] Dump testuale salvato in {dump_file}")
 
     out_json = {"uid": getattr(tag, "identifier", b"").hex(), "blocks": blocks}
+
     try:
         out_json["parsed"] = parse_blocks(blocks)
     except Exception as e:

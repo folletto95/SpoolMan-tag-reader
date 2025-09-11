@@ -41,9 +41,9 @@ def on_connect(tag):
     # UID
     dump_data["uid"] = binascii.hexlify(tag.identifier).decode()
 
-    # Prova a leggere tutti i blocchi possibili
+    blocks = []
+    # Prova prima a leggere i blocchi grezzi
     if hasattr(tag, "read"):
-        blocks = []
         page = 0
         while True:
             try:
@@ -57,9 +57,23 @@ def on_connect(tag):
                 block_hex = binascii.hexlify(block).decode()
                 blocks.append({"index": page + offset // 4, "data": block_hex})
             page += 4
-        dump_data["blocks"] = blocks
-        dump_data["parsed"] = parse_blocks(blocks)
-        print(f"[INFO] Decodificato: {dump_data['parsed']}")
+
+    # Se la lettura diretta fallisce, ripiega su dump() che restituisce stringhe
+    if not blocks and hasattr(tag, "dump"):
+        for line in tag.dump():
+            if isinstance(line, bytes):
+                block_bytes = bytes(line)[:4]
+                index = len(blocks)
+            else:
+                addr, data = line.split(":", 1)
+                index = int(addr.strip(), 16)
+                block_bytes = bytes.fromhex(data.strip().replace(" ", "")[:8])
+            block_hex = binascii.hexlify(block_bytes).decode()
+            blocks.append({"index": index, "data": block_hex})
+
+    dump_data["blocks"] = blocks
+    dump_data["parsed"] = parse_blocks(blocks)
+    print(f"[INFO] Decodificato: {dump_data['parsed']}")
 
     # Salva su file JSON
     with open(OUTPUT_FILE, "w") as f:

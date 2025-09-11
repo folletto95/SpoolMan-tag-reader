@@ -1,16 +1,17 @@
 import argparse
 import glob
 import os
+import re
+import time
+
 import nfc
 import json
 import binascii
-import string
-from datetime import datetime
 
 from parser import parse_blocks
 
-OUTPUT_FILE = f"bambu_tag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-RAW_FILE = OUTPUT_FILE.replace(".json", ".bin")
+HEX2 = re.compile(r"(?i)\b[0-9a-f]{2}\b")
+
 
 def detect_device():
     """Try to auto-detect an NFC reader.
@@ -36,12 +37,22 @@ def detect_device():
             continue
     return None
 
+
 def on_connect(tag):
     print(f"[INFO] Tag trovato: {tag}")
     dump_data = {
         "uid": binascii.hexlify(tag.identifier).decode()
     }
 
+
+
+    Tries to read Type2 tags via ``read_pages`` when available, otherwise
+    falls back to parsing the generic ``dump()`` output. ``blocks`` is a list
+    of ``{"index": int, "data": HEX16}`` dictionaries, where ``HEX16`` is
+    a 32-character uppercase hex string. ``raw_bytes`` contains all bytes
+    concatenated in the order read. ``dump_lines`` contains the raw lines from
+    ``tag.dump()`` for troubleshooting.
+    """
     blocks = []
     # Leggi la memoria del tag usando read() suddividendo ogni 16 byte
     if hasattr(tag, "read"):
@@ -85,18 +96,43 @@ def on_connect(tag):
     else:
         print("[WARN] Nessun dato da scrivere nel file binario")
 
-    parsed = parse_blocks(blocks)
-    dump_data["parsed"] = parsed
-    if parsed:
-        print(f"[INFO] Decodificato: {parsed}")
+
+    blocks, raw_bytes, dump_lines = robust_dump(tag)
+    print(f"[INFO] Blocchi estratti: {len(blocks)}  Bytes totali: {len(raw_bytes)}")
+
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    base = f"bambu_tag_{ts}"
+    raw_file = base + ".bin"
+    dump_file = base + ".dump.txt"
+
+    if raw_bytes:
+        with open(raw_file, "wb") as rf:
+            rf.write(raw_bytes)
+        print(f"[INFO] Dati grezzi salvati in {raw_file}")
     else:
-        print("[WARN] Nessun dato decodificato. Controlla il file grezzo per analisi.")
+        print(f"[WARN] Nessun dato grezzo salvato (dump vuoto)")
 
-    # Salva su file JSON
-    with open(OUTPUT_FILE, "w") as f:
-        json.dump(dump_data, f, indent=2)
+    if dump_lines:
+        with open(dump_file, "w") as df:
+            df.write("\n".join(dump_lines))
+        print(f"[INFO] Dump testuale salvato in {dump_file}")
 
-    print(f"[INFO] Dump salvato in {OUTPUT_FILE}")
+
+    out_json = {
+        "uid": getattr(tag, "identifier", b"").hex(),
+        "blocks": blocks,
+    }
+
+    try:
+        out_json["parsed"] = parse_blocks(blocks)
+    except Exception as e:
+        print(f"[WARN] parse_blocks fallito: {e}")
+
+    json_file = base + ".json"
+    with open(json_file, "w") as f:
+        json.dump(out_json, f, indent=2)
+    print(f"[INFO] JSON salvato in {json_file}")
+
     return True
 
 def main():

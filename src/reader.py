@@ -21,9 +21,10 @@ def detect_device():
     serial_globs = ("/dev/ttyUSB*", "/dev/ttyACM*")
     for pattern in serial_globs:
         for dev in glob.glob(pattern):
-            # nfcpy expects port names without the 'tty' prefix, e.g. USB0
-            port = os.path.basename(dev).replace("tty", "")
-            candidates.append(f"tty:{port}:pn532")
+            name = os.path.basename(dev)
+            if name.startswith("tty"):
+                name = name[3:]
+            candidates.append(f"tty:{name}:pn532")
 
     for dev in candidates:
         try:

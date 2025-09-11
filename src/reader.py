@@ -8,6 +8,9 @@ import string
 import nfc
 
 from parser import parse_blocks
+from bambu_read_pn532 import keylist_from_uid, read_mfc_with_keys
+from bambutag_parse import Tag as BambuTag
+from spoolman_formatter import tag_to_spoolman_payload
 
 
 def detect_device():
@@ -90,9 +93,27 @@ def robust_dump(tag):
 
 
 def on_connect(tag):
-    uid_hex = getattr(tag, "identifier", b"").hex()
+    uid_hex = getattr(tag, "identifier", b"").hex().upper()
     print(f"[INFO] Tag trovato: {tag}")
-    blocks, raw_bytes, dump_lines = robust_dump(tag)
+
+    blocks: list[dict] = []
+    raw_bytes = b""
+    dump_lines: list[str] = []
+
+    # prova prima la lettura autenticata MIFARE Classic
+    try:
+        keys = keylist_from_uid(uid_hex)
+        blocks, raw_bytes = read_mfc_with_keys(tag, keys)
+    except Exception as e:
+        print(f"[DBG] Lettura MIFARE autenticata fallita: {e}")
+
+    # se la lettura autenticata non produce dati, usa il fallback generico
+    if not raw_bytes:
+        blocks, raw_bytes, dump_lines = robust_dump(tag)
+    else:
+        for blk in blocks:
+            dump_lines.append(f"{blk['index']:03}: {blk['data']}")
+
     print(f"[INFO] Blocchi estratti: {len(blocks)}  Bytes totali: {len(raw_bytes)}")
 
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -100,6 +121,7 @@ def on_connect(tag):
     bin_file = base + ".bin"
     dump_file = base + ".dump.txt"
     json_file = base + ".json"
+    spool_file = base + ".spoolman.json"
 
     if raw_bytes:
         with open(bin_file, "wb") as rf:
@@ -114,6 +136,16 @@ def on_connect(tag):
         print(f"[INFO] Dump testuale salvato in {dump_file}")
 
     out_json = {"uid": uid_hex, "blocks": blocks}
+
+    try:
+        tag_obj = BambuTag(bin_file, raw_bytes)
+        spool_data = tag_to_spoolman_payload(tag_obj)
+        out_json["spoolman"] = spool_data
+        with open(spool_file, "w") as sf:
+            json.dump(spool_data, sf, indent=2)
+        print(f"[INFO] Dati Spoolman salvati in {spool_file}")
+    except Exception as e:
+        print(f"[WARN] Impossibile estrarre dati Spoolman: {e}")
 
     try:
         out_json["parsed"] = parse_blocks(blocks)

@@ -12,5 +12,12 @@ if [ -z "$VIRTUAL_ENV" ]; then
   source "$VENV_DIR/bin/activate"
 fi
 
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/.env"
+  set +a
+fi
+
 python -m pip install -r "$SCRIPT_DIR/requirements.txt"
 python "$SCRIPT_DIR/spoolman_tag_reader.py" "$@"

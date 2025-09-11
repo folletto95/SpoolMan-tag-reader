@@ -19,6 +19,21 @@ import nfc
 import requests
 
 
+def load_env(path: str = ".env") -> None:
+    """Load environment variables from a .env file if present."""
+    if not os.path.exists(path):
+        return
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key, value)
+
+
+load_env()
+
 @dataclass
 class SpoolInfo:
     """Metadata decoded from a BambuLab spool tag."""
@@ -31,6 +46,7 @@ class SpoolInfo:
 
 
 SPOOLMAN_URL = os.environ.get("SPOOLMAN_URL", "http://localhost:8000/api/spools")
+PN532_DEVICE = os.environ.get("PN532_DEVICE", "auto")
 
 
 def read_tag(device: str) -> nfc.tag.Tag:
@@ -39,6 +55,22 @@ def read_tag(device: str) -> nfc.tag.Tag:
         print("Place a BambuLab spool tag near the reader...")
         tag = clf.connect(rdwr={"on-connect": lambda tag: False})
         return tag
+
+
+def auto_detect_device() -> str:
+    """Try to locate a connected PN532 reader automatically."""
+    candidates = [
+        "usb",
+        "tty:USB0:pn532",
+        "tty:S0:pn532",
+    ]
+    for dev in candidates:
+        try:
+            with nfc.ContactlessFrontend(dev):
+                return dev
+        except Exception:
+            continue
+    raise RuntimeError("PN532 reader not found; specify device in .env or via --device")
 
 
 def decode_bambu_tag(tag: nfc.tag.Tag) -> SpoolInfo:
@@ -99,8 +131,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--device",
-        default="usb",
-        help="nfcpy device string, e.g. 'usb' or 'tty:USB0'",
+        default=PN532_DEVICE,
+        help="nfcpy device string, e.g. 'usb', 'tty:USB0', or 'auto'",
     )
     parser.add_argument(
         "--url",
@@ -109,7 +141,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    tag_obj = read_tag(args.device)
+    device = args.device
+    if device in ("auto", ""):
+        device = auto_detect_device()
+
+    tag_obj = read_tag(device)
     info = decode_bambu_tag(tag_obj)
     print(info)
     post_to_spoolman(info, args.url)
@@ -117,4 +153,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    

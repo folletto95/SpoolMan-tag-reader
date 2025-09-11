@@ -39,7 +39,9 @@ def detect_device():
 
 
 def robust_dump(tag):
+
     """Return (blocks, raw_bytes, dump_lines) from an NFC tag.
+
 
     Tries to read Type2 tags via ``read_pages`` when available, otherwise
     falls back to parsing the generic ``dump()`` output. ``blocks`` is a list
@@ -122,6 +124,7 @@ def on_connect(tag):
         with open(dump_file, "w") as df:
             df.write("\n".join(dump_lines))
         print(f"[INFO] Dump testuale salvato in {dump_file}")
+
 
     out_json = {
         "uid": getattr(tag, "identifier", b"").hex(),

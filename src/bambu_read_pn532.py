@@ -28,20 +28,12 @@ def keylist_from_uid(uid_hex: str):
 
 def read_mfc_with_keys(tag, keysA):
     """
-    Legge MIFARE Classic 1K: 16 settori, 4 blocchi/settore (0..3), blocco 3 = trailer.
-    Autentica su ciascun settore con Key A, legge i 3 blocchi dati.
-    Ritorna: blocks(list[{'index': int, 'data': HEX32}]), raw_bytes
+    Legge MIFARE Classic 1K: 16 settori, 4 blocchi/settore (0..3).
+    Autentica su ciascun settore con Key A e legge tutti i blocchi, trailer compresi.
+    Ritorna: blocks(list[{"index": int, "data": HEX32}]), raw_bytes
     """
     blocks = []
     raw = bytearray()
-
-    # Alcuni lettori consentono il blocco 0 (manufacturer) senza auth:
-    try:
-        b0 = tag.read(0) if hasattr(tag, "read") else tag.read_block(0)
-        blocks.append({"index": 0, "data": b0.hex().upper()})
-        raw.extend(b0)
-    except Exception:
-        pass
 
     for sector in range(16):
         base = sector * 4
@@ -56,21 +48,21 @@ def read_mfc_with_keys(tag, keysA):
             try:
                 auth_ok = bool(tag.authenticate(base, keyA, 0x60))
             except Exception:
-                auth_ok = False
+                pass
 
         # tentativo 2: classic_auth_a(blocco, key) (alcune build/porting)
         if not auth_ok and hasattr(tag, "classic_auth_a"):
             try:
                 auth_ok = bool(tag.classic_auth_a(base, keyA))
             except Exception:
-                auth_ok = False
+                pass
 
         if not auth_ok:
             # niente panico: proseguiamo con i settori che si autenticano
             continue
 
-        # leggi i blocchi dati 0..2 del settore (salta trailer 3)
-        for off in (0, 1, 2):
+        # leggi tutti i blocchi del settore, compreso il trailer
+        for off in range(4):
             blk = base + off
             try:
                 data = tag.read(blk) if hasattr(tag, "read") else tag.read_block(blk)

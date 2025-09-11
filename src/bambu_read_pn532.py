@@ -78,8 +78,7 @@ def read_mfc_with_keys(tag, keysA):
                 rsp = clf.exchange(cmd)
                 auth_ok = bool(rsp and rsp[0] == 0x00)
             except Exception:
-                auth_ok = False
-
+                pass
         if not auth_ok:
             continue
 

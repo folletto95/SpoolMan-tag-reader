@@ -1,0 +1,14 @@
+{
+  "uid": "04a224b3d82180",
+  "blocks": [
+    {"index": 0, "data": "0411223344556677"},
+    {"index": 1, "data": "deadbeefcafebabe"}
+  ],
+  "parsed": {
+    "spool_id": "unknown",
+    "material": null,
+    "color": null,
+    "weight_grams": null,
+    "raw_hex": "0411223344556677deadbeefcafebabe"
+  }
+}

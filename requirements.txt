@@ -1,2 +1,2 @@
-nfcpy
-requests
+nfcpy==1.0.4
+pyserial

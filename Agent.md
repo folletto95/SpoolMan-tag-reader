@@ -22,6 +22,7 @@ bambu-nfc-reader/
 ├── src/
 │ ├── reader.py
 │ ├── parser.py
+│ ├── bambutag_parse.py
 │ └── utils.py
 └── examples/
 └── dump_example.json
@@ -87,6 +88,11 @@ def parse_blocks(blocks):
     parsed["raw_blocks"] = blocks
     return parsed
 ```
+
+### 📄 src/bambutag_parse.py
+Script derivato da `parse.py` del progetto RFID-Tag-Guide. Permette di
+interpretare i file `.bin` esportati dalla tag Bambu e stampa a schermo le
+informazioni principali (materiale, colore, peso, ecc.).
 
 ### 📄 src/utils.py
 ```python

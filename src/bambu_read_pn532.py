@@ -28,49 +28,45 @@ def keylist_from_uid(uid_hex: str):
 
 def read_mfc_with_keys(tag, keysA):
     """
-    Legge MIFARE Classic 1K: 16 settori, 4 blocchi/settore (0..3).
-    Autentica su ciascun settore con Key A e legge tutti i blocchi, trailer compresi.
-    Ritorna: blocks(list[{"index": int, "data": HEX32}]), raw_bytes
+    Legge MIFARE Classic 1K (64 blocchi da 16 byte).
+    Per ogni blocco autentica con la Key A del settore di appartenenza e
+    tenta la lettura. Restituisce la lista dei blocchi letti e i byte grezzi.
     """
     blocks = []
     raw = bytearray()
 
-    for sector in range(16):
-        base = sector * 4
+    for blk in range(64):
+        sector = blk // 4
         keyA = keysA[sector] if sector < len(keysA) else None
         if keyA is None:
             continue
 
-        # nfcpy espone metodi leggermente diversi a seconda della versione/driver:
+        # autenticazione per il blocco corrente
         auth_ok = False
-        # tentativo 1: authenticate(blocco, key, 0x60=KeyA)
         if hasattr(tag, "authenticate"):
             try:
-                auth_ok = bool(tag.authenticate(base, keyA, 0x60))
+                auth_ok = bool(tag.authenticate(blk, keyA, 0x60))
             except Exception:
                 pass
-
-        # tentativo 2: classic_auth_a(blocco, key) (alcune build/porting)
+              
         if not auth_ok and hasattr(tag, "classic_auth_a"):
             try:
-                auth_ok = bool(tag.classic_auth_a(base, keyA))
+                auth_ok = bool(tag.classic_auth_a(blk, keyA))
             except Exception:
                 pass
 
         if not auth_ok:
-            # niente panico: proseguiamo con i settori che si autenticano
             continue
 
-        # leggi tutti i blocchi del settore, compreso il trailer
-        for off in range(4):
-            blk = base + off
-            try:
-                data = tag.read(blk) if hasattr(tag, "read") else tag.read_block(blk)
-                if len(data) == 16:
-                    blocks.append({"index": blk, "data": data.hex().upper()})
-                    raw.extend(data)
-            except Exception:
-                pass
+        # lettura del blocco
+        try:
+            data = tag.read(blk) if hasattr(tag, "read") else tag.read_block(blk)
+            if len(data) == 16:
+                blocks.append({"index": blk, "data": data.hex().upper()})
+                raw.extend(data)
+        except Exception:
+            pass
+
 
     return blocks, bytes(raw)
 

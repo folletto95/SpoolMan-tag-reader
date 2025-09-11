@@ -20,7 +20,6 @@ Un tool per **leggere e catalogare le tag NFC delle bobine BambuLab** usando un 
    ```bash
    pip install -r requirements.txt
    ```
-
 4. Collega il PN532 al Raspberry (via USB o adattatore seriale).
 
 ## ▶️ Uso

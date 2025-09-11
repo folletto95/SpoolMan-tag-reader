@@ -38,45 +38,52 @@ def detect_device():
 
 def on_connect(tag):
     print(f"[INFO] Tag trovato: {tag}")
-    dump_data = {}
-
-    # UID
-    dump_data["uid"] = binascii.hexlify(tag.identifier).decode()
+    dump_data = {
+        "uid": binascii.hexlify(tag.identifier).decode()
+    }
 
     blocks = []
-    # Leggi la memoria del tag 16 byte per volta usando read()
+    # Leggi la memoria del tag usando read() suddividendo ogni 16 byte
     if hasattr(tag, "read"):
-        page = 0
+        blk = 0
         while True:
             try:
-                data = tag.read(page)
+                data = tag.read(blk)
             except Exception:
                 break
             if not data:
                 break
-            block_hex = binascii.hexlify(data).decode().upper()
-            blocks.append({"index": page // 4, "data": block_hex})
-            page += 4
-    # In mancanza di read(), prova con dump() raggruppando ogni 16 byte
-    elif hasattr(tag, "dump"):
+            # tag.read potrebbe restituire più blocchi alla volta (es. 64 byte)
+            for off in range(0, len(data), 16):
+                chunk = data[off : off + 16]
+                if len(chunk) < 16:
+                    continue
+                block_hex = binascii.hexlify(chunk).decode().upper()
+                blocks.append({"index": blk + off // 16, "data": block_hex})
+            step = max(1, len(data) // 16)
+            blk += step
+    # Se read() non ha restituito dati, prova con dump()
+    if not blocks and hasattr(tag, "dump"):
         hexdigits = set(string.hexdigits)
-        buffer = ""
-        idx = 0
-        for line in tag.dump():
+        for idx, line in enumerate(tag.dump()):
             hex_chars = "".join(ch for ch in line if ch in hexdigits)
-            buffer += hex_chars.upper()
-            while len(buffer) >= 32:
-                blocks.append({"index": idx, "data": buffer[:32]})
-                buffer = buffer[32:]
-                idx += 1
+            block_hex = hex_chars.upper().ljust(32, "0")[:32]
+            blocks.append({"index": idx, "data": block_hex})
 
+    print(f"[DEBUG] Numero di blocchi letti: {len(blocks)}")
     dump_data["blocks"] = blocks
 
     # Salva anche i dati grezzi concatenati per analisi successive
-    raw_bytes = b"".join(binascii.unhexlify(b["data"]) for b in blocks if len(b["data"]) % 2 == 0)
-    with open(RAW_FILE, "wb") as rf:
-        rf.write(raw_bytes)
-    print(f"[INFO] Dati grezzi salvati in {RAW_FILE}")
+    raw_bytes = b"".join(
+        binascii.unhexlify(b["data"]) for b in blocks if len(b["data"]) % 2 == 0
+    )
+    print(f"[DEBUG] Dim. raw bytes: {len(raw_bytes)}")
+    if raw_bytes:
+        with open(RAW_FILE, "wb") as rf:
+            rf.write(raw_bytes)
+        print(f"[INFO] Dati grezzi salvati in {RAW_FILE}")
+    else:
+        print("[WARN] Nessun dato da scrivere nel file binario")
 
     parsed = parse_blocks(blocks)
     dump_data["parsed"] = parsed

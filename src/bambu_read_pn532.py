@@ -48,7 +48,7 @@ def read_mfc_with_keys(tag, keysA):
                 auth_ok = bool(tag.authenticate(blk, keyA, 0x60))
             except Exception:
                 pass
-              
+
         if not auth_ok and hasattr(tag, "classic_auth_a"):
             try:
                 auth_ok = bool(tag.classic_auth_a(blk, keyA))

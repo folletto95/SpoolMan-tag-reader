@@ -3,7 +3,7 @@
 
 from typing import Any, Dict
 
-from src.bambutag_parse import Tag, Unit
+from bambutag_parse import Tag, Unit
 
 
 def _unit_value(value: Any) -> Any:

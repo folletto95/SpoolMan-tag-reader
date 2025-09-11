@@ -8,7 +8,7 @@ Il progetto serve a leggere e catalogare le tag NFC delle bobine BambuLab usando
 ## 1. Creazione repository GitHub
 - Nome repo: **bambu-nfc-reader**
 - Descrizione: Tool per leggere e catalogare le tag NFC delle bobine BambuLab con Raspberry Pi + PN532.
-- Licenza: MIT
+- Licenza: GPL-3.0
 - Inizializzare **senza** README, .gitignore, né licenza (li aggiungiamo noi).
 
 ---

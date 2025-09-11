@@ -1,3 +1,5 @@
+import argparse
+import os
 import nfc
 import json
 import binascii
@@ -32,8 +34,16 @@ def on_connect(tag):
     return True
 
 def main():
+    parser = argparse.ArgumentParser(description="Legge le tag NFC delle bobine BambuLab")
+    parser.add_argument(
+        "--device",
+        default=os.environ.get("NFC_DEVICE", "usb"),
+        help="stringa dispositivo nfcpy (es. 'usb' o 'tty:USB0:pn532')",
+    )
+    args = parser.parse_args()
+
     print("[INFO] Avvio lettore NFC...")
-    with nfc.ContactlessFrontend('usb') as clf:
+    with nfc.ContactlessFrontend(args.device) as clf:
         clf.connect(rdwr={'on-connect': on_connect})
 
 if __name__ == "__main__":

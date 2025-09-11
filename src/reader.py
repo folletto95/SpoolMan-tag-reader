@@ -98,9 +98,22 @@ def main():
         print("[ERROR] Nessun lettore NFC trovato. Specifica --device o variabile NFC_DEVICE.")
         return
 
-    print(f"[INFO] Avvio lettore NFC su '{device}'...")
-    with nfc.ContactlessFrontend(device) as clf:
-        clf.connect(rdwr={'on-connect': on_connect})
+    attempts = [device]
+    if device and not device.startswith("usb"):
+        attempts.append("usb")  # fallback CCID/PCSC
+
+    last_err = None
+    for dev in attempts:
+        print(f"[INFO] Provo ad aprire NFC device '{dev}'...")
+        try:
+            with nfc.ContactlessFrontend(dev) as clf:
+                clf.connect(rdwr={'on-connect': on_connect})
+                return
+        except Exception as e:
+            print(f"[WARN] Apertura fallita su '{dev}': {e}")
+            last_err = e
+
+    raise SystemExit(f"[ERROR] Nessun lettore NFC utilizzabile. Ultimo errore: {last_err}")
 
 if __name__ == "__main__":
     main()

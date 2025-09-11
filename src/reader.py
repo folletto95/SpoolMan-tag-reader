@@ -4,6 +4,7 @@ import os
 import nfc
 import json
 import binascii
+import string
 from datetime import datetime
 
 from parser import parse_blocks
@@ -41,15 +42,41 @@ def on_connect(tag):
     # UID
     dump_data["uid"] = binascii.hexlify(tag.identifier).decode()
 
-    # Prova a leggere tutti i blocchi possibili
-    if hasattr(tag, 'dump'):
-        blocks = []
-        for i, block in enumerate(tag.dump()):
-            block_hex = binascii.hexlify(block).decode()
-            blocks.append({"index": i, "data": block_hex})
-        dump_data["blocks"] = blocks
-        dump_data["parsed"] = parse_blocks(blocks)
-        print(f"[INFO] Decodificato: {dump_data['parsed']}")
+    blocks = []
+    # Usa tag.dump() per ottenere blocchi da 16 byte e convertirli in esadecimale
+    if hasattr(tag, "dump"):
+        hexdigits = set(string.hexdigits)
+        for idx, line in enumerate(tag.dump()):
+            if isinstance(line, bytes):
+                block_hex = binascii.hexlify(line).decode().upper()
+            else:
+                hex_chars = "".join(ch for ch in line if ch in hexdigits)
+                if len(hex_chars) < 32:
+                    continue
+                block_hex = hex_chars[:32].upper()
+            blocks.append({"index": idx, "data": block_hex})
+
+    # Se dump() non è disponibile, prova la lettura grezza pagina per pagina
+    if not blocks and hasattr(tag, "read"):
+        page = 0
+        while True:
+            try:
+                data = tag.read(page)
+            except Exception:
+                break
+            if not data:
+                break
+            for offset in range(0, len(data), 16):
+                block = data[offset : offset + 16]
+                if len(block) < 16:
+                    break
+                block_hex = binascii.hexlify(block).decode().upper()
+                blocks.append({"index": page + offset // 16, "data": block_hex})
+            page += 4
+
+    dump_data["blocks"] = blocks
+    dump_data["parsed"] = parse_blocks(blocks)
+    print(f"[INFO] Decodificato: {dump_data['parsed']}")
 
     # Salva su file JSON
     with open(OUTPUT_FILE, "w") as f:

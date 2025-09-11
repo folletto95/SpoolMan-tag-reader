@@ -5,7 +5,6 @@ import nfc
 import json
 import binascii
 import string
-import errno
 from datetime import datetime
 
 from parser import parse_blocks
@@ -103,15 +102,6 @@ def main():
     try:
         with nfc.ContactlessFrontend(device) as clf:
             clf.connect(rdwr={'on-connect': on_connect})
-    except OSError as e:
-        print(f"[ERROR] Impossibile aprire il lettore NFC: {e}")
-        if e.errno == errno.ETIMEDOUT:
-            print("[HINT] Nessuna risposta dal PN532. Controlla cablaggio e parametro --device.")
-        elif e.errno == errno.ENOENT:
-            print("[HINT] Il device specificato non esiste. Verifica il nome (es. /dev/ttyUSB0).")
-        elif e.errno == errno.EACCES:
-            print("[HINT] Permessi insufficienti per accedere al device. Usa sudo o aggiungi l'utente al gruppo dialout.")
-
     except Exception as e:
         print(f"[ERROR] Impossibile aprire il lettore NFC: {e}")
 

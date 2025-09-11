@@ -48,51 +48,48 @@ def robust_dump(tag):
     concatenated in the order read.
     """
     blocks = []
-    raw = bytearray()
+    # Leggi la memoria del tag usando read() suddividendo ogni 16 byte
+    if hasattr(tag, "read"):
+        blk = 0
+        while True:
+            try:
+                data = tag.read(blk)
+            except Exception:
+                break
+            if not data:
+                break
+            # tag.read potrebbe restituire più blocchi alla volta (es. 64 byte)
+            for off in range(0, len(data), 16):
+                chunk = data[off : off + 16]
+                if len(chunk) < 16:
+                    continue
+                block_hex = binascii.hexlify(chunk).decode().upper()
+                blocks.append({"index": blk + off // 16, "data": block_hex})
+            step = max(1, len(data) // 16)
+            blk += step
+    # In mancanza di read(), prova con dump() convertendo ogni riga in un blocco
+    elif hasattr(tag, "dump"):
+        hexdigits = set(string.hexdigits)
+        for idx, line in enumerate(tag.dump()):
+            hex_chars = "".join(ch for ch in line if ch in hexdigits)
+            block_hex = hex_chars.upper().ljust(32, "0")[:32]
+            blocks.append({"index": idx, "data": block_hex})
 
-    # 1) Prefer Type2 tags with read_pages (16 bytes per call)
-    try:
-        if hasattr(tag, "read_pages"):
-            idx = 0
-            page = 0
-            while True:
-                try:
-                    data = tag.read_pages(page)
-                except Exception:
-                    break
-                if not data or len(data) != 16:
-                    break
-                raw.extend(data)
-                blocks.append({"index": idx, "data": data.hex().upper()})
-                idx += 1
-                page += 4
-            if blocks:
-                return blocks, bytes(raw)
-    except Exception:
-        pass
+    print(f"[DEBUG] Numero di blocchi letti: {len(blocks)}")
+    dump_data["blocks"] = blocks
 
-    # 2) Fallback: parse output of dump()
-    try:
-        lines = tag.dump()
-    except Exception:
-        lines = []
+    # Salva anche i dati grezzi concatenati per analisi successive
+    raw_bytes = b"".join(
+        binascii.unhexlify(b["data"]) for b in blocks if len(b["data"]) % 2 == 0
+    )
+    print(f"[DEBUG] Dim. raw bytes: {len(raw_bytes)}")
+    if raw_bytes:
+        with open(RAW_FILE, "wb") as rf:
+            rf.write(raw_bytes)
+        print(f"[INFO] Dati grezzi salvati in {RAW_FILE}")
+    else:
+        print("[WARN] Nessun dato da scrivere nel file binario")
 
-    bytes_seq = []
-    for ln in lines:
-        for m in HEX2.finditer(str(ln)):
-            bytes_seq.append(int(m.group(0), 16))
-
-    if not bytes_seq:
-        return [], b""
-
-    raw = bytes(bytes_seq)
-    for i in range(0, len(raw), 16):
-        chunk = raw[i : i + 16]
-        if len(chunk) < 16:
-            break
-        blocks.append({"index": i // 16, "data": chunk.hex().upper()})
-
-    return blocks, raw
 
 
 def on_connect(tag):

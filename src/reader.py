@@ -99,11 +99,8 @@ def main():
         return
 
     print(f"[INFO] Avvio lettore NFC su '{device}'...")
-    try:
-        with nfc.ContactlessFrontend(device) as clf:
-            clf.connect(rdwr={'on-connect': on_connect})
-    except Exception as e:
-        print(f"[ERROR] Impossibile aprire il lettore NFC: {e}")
+    with nfc.ContactlessFrontend(device) as clf:
+        clf.connect(rdwr={'on-connect': on_connect})
 
 if __name__ == "__main__":
     main()

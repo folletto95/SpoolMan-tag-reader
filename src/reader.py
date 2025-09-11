@@ -42,11 +42,21 @@ def on_connect(tag):
     dump_data["uid"] = binascii.hexlify(tag.identifier).decode()
 
     # Prova a leggere tutti i blocchi possibili
-    if hasattr(tag, 'dump'):
+    if hasattr(tag, "read"):
         blocks = []
-        for i, block in enumerate(tag.dump()):
-            block_hex = binascii.hexlify(block).decode()
-            blocks.append({"index": i, "data": block_hex})
+        page = 0
+        while True:
+            try:
+                data = tag.read(page)
+            except Exception:
+                break
+            if not data:
+                break
+            for offset in range(0, len(data), 4):
+                block = data[offset : offset + 4]
+                block_hex = binascii.hexlify(block).decode()
+                blocks.append({"index": page + offset // 4, "data": block_hex})
+            page += 4
         dump_data["blocks"] = blocks
         dump_data["parsed"] = parse_blocks(blocks)
         print(f"[INFO] Decodificato: {dump_data['parsed']}")

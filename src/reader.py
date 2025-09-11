@@ -10,6 +10,7 @@ from datetime import datetime
 from parser import parse_blocks
 
 OUTPUT_FILE = f"bambu_tag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+RAW_FILE = OUTPUT_FILE.replace(".json", ".bin")
 
 def detect_device():
     """Try to auto-detect an NFC reader.
@@ -75,8 +76,19 @@ def on_connect(tag):
             page += 4
 
     dump_data["blocks"] = blocks
-    dump_data["parsed"] = parse_blocks(blocks)
-    print(f"[INFO] Decodificato: {dump_data['parsed']}")
+
+    # Salva anche i dati grezzi concatenati per analisi successive
+    raw_bytes = b"".join(binascii.unhexlify(b["data"]) for b in blocks if len(b["data"]) % 2 == 0)
+    with open(RAW_FILE, "wb") as rf:
+        rf.write(raw_bytes)
+    print(f"[INFO] Dati grezzi salvati in {RAW_FILE}")
+
+    parsed = parse_blocks(blocks)
+    dump_data["parsed"] = parsed
+    if parsed:
+        print(f"[INFO] Decodificato: {parsed}")
+    else:
+        print("[WARN] Nessun dato decodificato. Controlla il file grezzo per analisi.")
 
     # Salva su file JSON
     with open(OUTPUT_FILE, "w") as f:

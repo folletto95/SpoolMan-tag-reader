@@ -41,15 +41,43 @@ def on_connect(tag):
     # UID
     dump_data["uid"] = binascii.hexlify(tag.identifier).decode()
 
-    # Prova a leggere tutti i blocchi possibili
-    if hasattr(tag, 'dump'):
-        blocks = []
-        for i, block in enumerate(tag.dump()):
-            block_hex = binascii.hexlify(block).decode()
-            blocks.append({"index": i, "data": block_hex})
-        dump_data["blocks"] = blocks
-        dump_data["parsed"] = parse_blocks(blocks)
-        print(f"[INFO] Decodificato: {dump_data['parsed']}")
+    blocks = []
+    # Prova prima a leggere i blocchi grezzi
+    if hasattr(tag, "read"):
+        page = 0
+        while True:
+            try:
+                data = tag.read(page)
+            except Exception:
+                break
+            if not data:
+                break
+            for offset in range(0, len(data), 4):
+                block = data[offset : offset + 4]
+                block_hex = binascii.hexlify(block).decode()
+                blocks.append({"index": page + offset // 4, "data": block_hex})
+            page += 4
+
+    # Se la lettura diretta fallisce, ripiega su dump() e filtra le righe utili
+    if not blocks and hasattr(tag, "dump"):
+        for line in tag.dump():
+            if isinstance(line, bytes):
+                block = line[:4]
+                block_hex = binascii.hexlify(block).decode()
+                index = len(blocks)
+                blocks.append({"index": index, "data": block_hex})
+                continue
+
+            # Per le stringhe estrai solo i caratteri esadecimali e ignora altro
+            hex_chars = "".join(ch for ch in line if ch in "0123456789abcdefABCDEF")
+            if len(hex_chars) < 8:
+                continue
+            block_hex = hex_chars[:8]
+            blocks.append({"index": len(blocks), "data": block_hex})
+
+    dump_data["blocks"] = blocks
+    dump_data["parsed"] = parse_blocks(blocks)
+    print(f"[INFO] Decodificato: {dump_data['parsed']}")
 
     # Salva su file JSON
     with open(OUTPUT_FILE, "w") as f:

@@ -57,6 +57,18 @@ def on_connect(tag):
             block_hex = binascii.hexlify(data).decode().upper()
             blocks.append({"index": page // 4, "data": block_hex})
             page += 4
+    # In mancanza di read(), prova con dump() raggruppando ogni 16 byte
+    elif hasattr(tag, "dump"):
+        hexdigits = set(string.hexdigits)
+        buffer = ""
+        idx = 0
+        for line in tag.dump():
+            hex_chars = "".join(ch for ch in line if ch in hexdigits)
+            buffer += hex_chars.upper()
+            while len(buffer) >= 32:
+                blocks.append({"index": idx, "data": buffer[:32]})
+                buffer = buffer[32:]
+                idx += 1
 
     # Se la lettura diretta non ha prodotto dati, prova con dump()
     if not blocks and hasattr(tag, "dump"):

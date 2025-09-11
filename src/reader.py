@@ -39,68 +39,79 @@ def detect_device():
 
 
 def robust_dump(tag):
-    """Return (blocks, raw_bytes) from an NFC tag.
+
+    """Return (blocks, raw_bytes, dump_lines) from an NFC tag.
+
 
     Tries to read Type2 tags via ``read_pages`` when available, otherwise
     falls back to parsing the generic ``dump()`` output. ``blocks`` is a list
     of ``{"index": int, "data": HEX16}`` dictionaries, where ``HEX16`` is
     a 32-character uppercase hex string. ``raw_bytes`` contains all bytes
-    concatenated in the order read.
+    concatenated in the order read. ``dump_lines`` contains the raw lines from
+    ``tag.dump()`` for troubleshooting.
     """
     blocks = []
-    # Leggi la memoria del tag usando read() suddividendo ogni 16 byte
-    if hasattr(tag, "read"):
-        blk = 0
-        while True:
-            try:
-                data = tag.read(blk)
-            except Exception:
-                break
-            if not data:
-                break
-            # tag.read potrebbe restituire più blocchi alla volta (es. 64 byte)
-            for off in range(0, len(data), 16):
-                chunk = data[off : off + 16]
-                if len(chunk) < 16:
-                    continue
-                block_hex = binascii.hexlify(chunk).decode().upper()
-                blocks.append({"index": blk + off // 16, "data": block_hex})
-            step = max(1, len(data) // 16)
-            blk += step
-    # In mancanza di read(), prova con dump() convertendo ogni riga in un blocco
-    elif hasattr(tag, "dump"):
-        hexdigits = set(string.hexdigits)
-        for idx, line in enumerate(tag.dump()):
-            hex_chars = "".join(ch for ch in line if ch in hexdigits)
-            block_hex = hex_chars.upper().ljust(32, "0")[:32]
-            blocks.append({"index": idx, "data": block_hex})
+    raw = bytearray()
 
-    print(f"[DEBUG] Numero di blocchi letti: {len(blocks)}")
-    dump_data["blocks"] = blocks
+    # 1) Prefer Type2 tags with read_pages (16 bytes per call)
+    try:
+        if hasattr(tag, "read_pages"):
+            idx = 0
+            page = 0
+            while True:
+                try:
+                    data = tag.read_pages(page)
+                except Exception:
+                    break
+                if not data or len(data) != 16:
+                    break
+                raw.extend(data)
+                blocks.append({"index": idx, "data": data.hex().upper()})
+                idx += 1
+                page += 4
+            if blocks:
+                return blocks, bytes(raw), []
+    except Exception:
+        pass
 
-    # Salva anche i dati grezzi concatenati per analisi successive
-    raw_bytes = b"".join(
-        binascii.unhexlify(b["data"]) for b in blocks if len(b["data"]) % 2 == 0
-    )
-    print(f"[DEBUG] Dim. raw bytes: {len(raw_bytes)}")
-    if raw_bytes:
-        with open(RAW_FILE, "wb") as rf:
-            rf.write(raw_bytes)
-        print(f"[INFO] Dati grezzi salvati in {RAW_FILE}")
-    else:
-        print("[WARN] Nessun dato da scrivere nel file binario")
+    # 2) Fallback: parse output of dump()
+    try:
+        lines = tag.dump()
+    except Exception:
+        lines = []
 
+    dump_lines = [str(ln) for ln in lines]
+    bytes_seq = bytearray()
+    for ln in lines:
+        if isinstance(ln, (bytes, bytearray)):
+            bytes_seq.extend(ln)
+        else:
+            for m in HEX2.finditer(str(ln)):
+                bytes_seq.append(int(m.group(0), 16))
+
+    if not bytes_seq:
+        return [], b"", dump_lines
+
+    raw = bytes(bytes_seq)
+    for i in range(0, len(raw), 16):
+        chunk = raw[i : i + 16]
+        if len(chunk) < 16:
+            break
+        blocks.append({"index": i // 16, "data": chunk.hex().upper()})
+
+    return blocks, raw, dump_lines
 
 
 def on_connect(tag):
     print(f"[INFO] Tag: {tag}  UID: {getattr(tag, 'identifier', b'').hex() if hasattr(tag, 'identifier') else 'n/a'}")
 
-    blocks, raw_bytes = robust_dump(tag)
+    blocks, raw_bytes, dump_lines = robust_dump(tag)
     print(f"[INFO] Blocchi estratti: {len(blocks)}  Bytes totali: {len(raw_bytes)}")
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     base = f"bambu_tag_{ts}"
     raw_file = base + ".bin"
+    dump_file = base + ".dump.txt"
 
     if raw_bytes:
         with open(raw_file, "wb") as rf:
@@ -108,6 +119,12 @@ def on_connect(tag):
         print(f"[INFO] Dati grezzi salvati in {raw_file}")
     else:
         print(f"[WARN] Nessun dato grezzo salvato (dump vuoto)")
+
+    if dump_lines:
+        with open(dump_file, "w") as df:
+            df.write("\n".join(dump_lines))
+        print(f"[INFO] Dump testuale salvato in {dump_file}")
+
 
     out_json = {
         "uid": getattr(tag, "identifier", b"").hex(),

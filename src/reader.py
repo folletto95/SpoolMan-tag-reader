@@ -58,18 +58,22 @@ def on_connect(tag):
                 blocks.append({"index": page + offset // 4, "data": block_hex})
             page += 4
 
-    # Se la lettura diretta fallisce, ripiega su dump() che restituisce stringhe
+    # Se la lettura diretta fallisce, ripiega su dump() e filtra le righe utili
     if not blocks and hasattr(tag, "dump"):
         for line in tag.dump():
             if isinstance(line, bytes):
-                block_bytes = bytes(line)[:4]
+                block = line[:4]
+                block_hex = binascii.hexlify(block).decode()
                 index = len(blocks)
-            else:
-                addr, data = line.split(":", 1)
-                index = int(addr.strip(), 16)
-                block_bytes = bytes.fromhex(data.strip().replace(" ", "")[:8])
-            block_hex = binascii.hexlify(block_bytes).decode()
-            blocks.append({"index": index, "data": block_hex})
+                blocks.append({"index": index, "data": block_hex})
+                continue
+
+            # Per le stringhe estrai solo i caratteri esadecimali e ignora altro
+            hex_chars = "".join(ch for ch in line if ch in "0123456789abcdefABCDEF")
+            if len(hex_chars) < 8:
+                continue
+            block_hex = hex_chars[:8]
+            blocks.append({"index": len(blocks), "data": block_hex})
 
     dump_data["blocks"] = blocks
     dump_data["parsed"] = parse_blocks(blocks)

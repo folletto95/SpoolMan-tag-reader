@@ -1,4 +1,5 @@
 import argparse
+import glob
 import os
 import nfc
 import json
@@ -9,6 +10,30 @@ from parser import parse_blocks
 
 OUTPUT_FILE = f"bambu_tag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 
+
+def detect_device():
+    """Try to auto-detect an NFC reader.
+
+    Attempts USB first, then common serial interfaces like /dev/ttyUSB* or
+    /dev/ttyACM*. Returns a device string understood by nfcpy or None if no
+    reader is found.
+    """
+    candidates = ["usb"]
+    serial_globs = ("/dev/ttyUSB*", "/dev/ttyACM*")
+    for pattern in serial_globs:
+        for dev in glob.glob(pattern):
+            name = os.path.basename(dev)
+            candidates.append(f"tty:{name}:pn532")
+
+    for dev in candidates:
+        try:
+            with nfc.ContactlessFrontend(dev):
+                return dev
+        except Exception:
+            continue
+    return None
+  
+  
 def on_connect(tag):
     print(f"[INFO] Tag trovato: {tag}")
     dump_data = {}
@@ -37,13 +62,17 @@ def main():
     parser = argparse.ArgumentParser(description="Legge le tag NFC delle bobine BambuLab")
     parser.add_argument(
         "--device",
-        default=os.environ.get("NFC_DEVICE", "usb"),
         help="stringa dispositivo nfcpy (es. 'usb' o 'tty:USB0:pn532')",
     )
     args = parser.parse_args()
 
-    print("[INFO] Avvio lettore NFC...")
-    with nfc.ContactlessFrontend(args.device) as clf:
+    device = args.device or os.environ.get("NFC_DEVICE") or detect_device()
+    if device is None:
+        print("[ERROR] Nessun lettore NFC trovato. Specifica --device o variabile NFC_DEVICE.")
+        return
+
+    print(f"[INFO] Avvio lettore NFC su '{device}'...")
+    with nfc.ContactlessFrontend(device) as clf:
         clf.connect(rdwr={'on-connect': on_connect})
 
 if __name__ == "__main__":

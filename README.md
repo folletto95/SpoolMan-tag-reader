@@ -20,16 +20,19 @@ Un tool per **leggere e catalogare le tag NFC delle bobine BambuLab** usando un 
    ```bash
    pip install -r requirements.txt
    ```
+
 4. Collega il PN532 al Raspberry (via USB o adattatore seriale).
 
 ## ▶️ Uso
 
-Esegui il lettore (USB):
+Esegui il lettore (rilevamento automatico):
 ```bash
 python src/reader.py
 ```
+Il programma proverà a individuare un lettore NFC collegato via USB o
+seriale (`/dev/ttyUSB*`).
 
-Per un lettore collegato via seriale (es. `/dev/ttyUSB0`):
+Per specificare manualmente il dispositivo:
 ```bash
 python src/reader.py --device 'tty:USB0:pn532'
 ```
@@ -38,6 +41,7 @@ In alternativa puoi impostare la variabile d'ambiente `NFC_DEVICE`:
 ```bash
 export NFC_DEVICE='tty:USB0:pn532'
 python src/reader.py
+
 ```
 
 Appoggia una bobina Bambu sul lettore. Verrà generato un file JSON con:

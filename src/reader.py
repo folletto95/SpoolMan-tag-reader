@@ -52,7 +52,6 @@ def on_connect(tag):
     a 32-character uppercase hex string. ``raw_bytes`` contains all bytes
     concatenated in the order read. ``dump_lines`` contains the raw lines from
     ``tag.dump()`` for troubleshooting.
-    """
     blocks = []
     # Leggi la memoria del tag usando read() suddividendo ogni 16 byte
     if hasattr(tag, "read"):

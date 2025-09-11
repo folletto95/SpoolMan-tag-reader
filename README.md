@@ -41,6 +41,7 @@ In alternativa puoi impostare la variabile d'ambiente `NFC_DEVICE`:
 ```bash
 export NFC_DEVICE='tty:USB0:pn532'
 python src/reader.py
+
 ```
 
 Appoggia una bobina Bambu sul lettore. Verrà generato un file JSON con:

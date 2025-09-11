@@ -10,6 +10,7 @@ from parser import parse_blocks
 
 OUTPUT_FILE = f"bambu_tag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 
+
 def detect_device():
     """Try to auto-detect an NFC reader.
 
@@ -31,7 +32,8 @@ def detect_device():
         except Exception:
             continue
     return None
-
+  
+  
 def on_connect(tag):
     print(f"[INFO] Tag trovato: {tag}")
     dump_data = {}

@@ -4,6 +4,7 @@ import binascii
 import json
 import time
 import re
+import sys
 
 HEX2 = re.compile(r'(?i)\b[0-9a-f]{2}\b')
 
@@ -77,8 +78,16 @@ def on_connect(tag):
 
 
 def main():
-    print("[INFO] Avvio lettore NFC…")
-    with nfc.ContactlessFrontend("usb") as clf:
+    device = None
+    if len(sys.argv) > 1 and sys.argv[1] == "--device" and len(sys.argv) > 2:
+        device = sys.argv[2]
+
+    if not device:
+        # default PN532 su ttyUSB0
+        device = "tty:USB0:pn532"
+
+    print(f"[INFO] Avvio lettore NFC su '{device}'…")
+    with nfc.ContactlessFrontend(device) as clf:
         clf.connect(rdwr={"on-connect": on_connect})
 
 

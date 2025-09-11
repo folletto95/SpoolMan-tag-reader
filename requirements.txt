@@ -1,3 +1,4 @@
 nfcpy==1.0.4
 pyserial
 pycryptodomex>=3.19
+adafruit-circuitpython-pn532

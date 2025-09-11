@@ -1,12 +1,16 @@
 """Simple reader for BambuLab spool NFC tags.
 
-This script uses a PN532 reader connected via USB to read BambuLab
-spool tags and posts decoded information to a SpoolMan instance.
+This script uses a PN532 reader to read BambuLab spool tags and posts
+decoded information to a SpoolMan instance. The reader interface and
+SpoolMan URL can be configured from the command line to work across
+different Linux distributions.
 """
 from __future__ import annotations
 
+import argparse
 import binascii
 import json
+import os
 import sys
 from dataclasses import dataclass
 from typing import Optional
@@ -26,12 +30,12 @@ class SpoolInfo:
     raw_hex: Optional[str] = None
 
 
-SPOOLMAN_URL = "http://localhost:8000/api/spools"
+SPOOLMAN_URL = os.environ.get("SPOOLMAN_URL", "http://localhost:8000/api/spools")
 
 
-def read_tag() -> nfc.tag.Tag:
+def read_tag(device: str) -> nfc.tag.Tag:
     """Wait for a tag and return the nfcpy tag object."""
-    with nfc.ContactlessFrontend("usb") as clf:
+    with nfc.ContactlessFrontend(device) as clf:
         print("Place a BambuLab spool tag near the reader...")
         tag = clf.connect(rdwr={"on-connect": lambda tag: False})
         return tag
@@ -72,7 +76,8 @@ def decode_bambu_tag(tag: nfc.tag.Tag) -> SpoolInfo:
     )
 
 
-def post_to_spoolman(info: SpoolInfo) -> None:
+
+def post_to_spoolman(info: SpoolInfo, url: str) -> None:
     """Post decoded info to SpoolMan."""
     payload = {
         "spool_id": info.spool_id,
@@ -83,7 +88,7 @@ def post_to_spoolman(info: SpoolInfo) -> None:
     # Remove None values to keep payload compact
     payload = {k: v for k, v in payload.items() if v is not None}
     try:
-        response = requests.post(SPOOLMAN_URL, json=payload, timeout=5)
+        response = requests.post(url, json=payload, timeout=5)
         response.raise_for_status()
     except requests.RequestException as exc:
         print(f"Failed to post to SpoolMan: {exc}", file=sys.stderr)
@@ -91,8 +96,25 @@ def post_to_spoolman(info: SpoolInfo) -> None:
         print("Spool posted to SpoolMan")
 
 
-if __name__ == "__main__":
-    tag_obj = read_tag()
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--device",
+        default="usb",
+        help="nfcpy device string, e.g. 'usb' or 'tty:USB0'",
+    )
+    parser.add_argument(
+        "--url",
+        default=SPOOLMAN_URL,
+        help="SpoolMan API endpoint",
+    )
+    args = parser.parse_args()
+
+    tag_obj = read_tag(args.device)
     info = decode_bambu_tag(tag_obj)
     print(info)
-    post_to_spoolman(info)
+    post_to_spoolman(info, args.url)
+
+
+if __name__ == "__main__":
+    main()

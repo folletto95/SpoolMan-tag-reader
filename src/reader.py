@@ -116,7 +116,7 @@ def on_connect(tag):
     out_json = {"uid": uid_hex, "blocks": blocks}
 
     try:
-        out_json["parsed"] = parse_blocks(blocks, uid_hex)
+        out_json["parsed"] = parse_blocks(blocks)
     except Exception as e:
         print(f"[WARN] parse_blocks fallito: {e}")
 

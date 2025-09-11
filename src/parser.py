@@ -28,13 +28,13 @@ def _le_u32(b: bytes) -> int:
     return int.from_bytes(b, "little", signed=False)
 
 def _le_f32(b: bytes) -> float:
-    # float IEEE754 little-endian
-    return struct.unpack("<f", b)[0]
+    """Decode a little-endian IEEE754 float"""
+    return struct.unpack('<f', b)[0]
+
 
 def _safe_slice(b: bytes, start: int, end: int) -> bytes:
-    if start < 0 or end > len(b) or start >= end:
-        return b""
-    return b[start:end]
+    """Return ``b[start:end]`` guarding against out-of-range indexes"""
+    return b[start:end] if 0 <= start < end <= len(b) else b''
 
 def parse_blocks(blocks: List[Dict[str, Any]], uid_hex: Optional[str] = None) -> Dict[str, Any]:
     """

@@ -51,6 +51,17 @@ Appoggia una bobina Bambu sul lettore. Verrà generato un file JSON con:
 - Dump di tutti i blocchi disponibili
 - Decodifica dei campi noti (spool_id, materiale, colore, peso)
 
+### Dump con Proxmark3
+
+Per usare un Proxmark3 al posto del lettore PN532:
+
+```bash
+python src/tag_dump_pm3.py -o dumps/
+```
+
+Il comando deriva automaticamente le chiavi della tag e salva i file `.bin` e `.json` nella cartella indicata. Aggiungi `--backdoor` se vuoi usare la chiave di backdoor senza libreria crittografica.
+
+
 ## 📂 Output
 
 Oltre al file JSON vengono generati:

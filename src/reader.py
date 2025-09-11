@@ -70,13 +70,32 @@ def on_connect(tag):
                 buffer = buffer[32:]
                 idx += 1
 
+    # Se la lettura diretta non ha prodotto dati, prova con dump()
+    if not blocks and hasattr(tag, "dump"):
+        print("[WARN] Lettura diretta fallita, uso dump()")
+        hexdigits = set(string.hexdigits)
+        buffer = ""
+        idx = 0
+        for line in tag.dump():
+            hex_chars = "".join(ch for ch in line if ch in hexdigits)
+            buffer += hex_chars.upper()
+            while len(buffer) >= 32:
+                blocks.append({"index": idx, "data": buffer[:32]})
+                buffer = buffer[32:]
+                idx += 1
+
     dump_data["blocks"] = blocks
 
     # Salva anche i dati grezzi concatenati per analisi successive
-    raw_bytes = b"".join(binascii.unhexlify(b["data"]) for b in blocks if len(b["data"]) % 2 == 0)
+    raw_bytes = b"".join(
+        binascii.unhexlify(b["data"]) for b in blocks if len(b["data"]) % 2 == 0
+    )
     with open(RAW_FILE, "wb") as rf:
         rf.write(raw_bytes)
-    print(f"[INFO] Dati grezzi salvati in {RAW_FILE}")
+    if raw_bytes:
+        print(f"[INFO] Dati grezzi salvati in {RAW_FILE}")
+    else:
+        print(f"[WARN] Nessun dato grezzo ottenuto, file vuoto {RAW_FILE}")
 
     parsed = parse_blocks(blocks)
     dump_data["parsed"] = parsed

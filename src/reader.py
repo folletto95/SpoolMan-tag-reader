@@ -111,6 +111,7 @@ def main():
             print("[HINT] Il device specificato non esiste. Verifica il nome (es. /dev/ttyUSB0).")
         elif e.errno == errno.EACCES:
             print("[HINT] Permessi insufficienti per accedere al device. Usa sudo o aggiungi l'utente al gruppo dialout.")
+
     except Exception as e:
         print(f"[ERROR] Impossibile aprire il lettore NFC: {e}")
 

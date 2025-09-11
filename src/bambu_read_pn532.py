@@ -2,17 +2,16 @@
 import sys, time, json, binascii
 import nfc
 
-# importa il KDF della repo
-from src.thirdparty.deriveKeys import derive_keys  # <-- usa il nome reale della funzione in deriveKeys.py
-# se il nome differisce (es. derive_from_uid), adegua la riga sopra.
+# importa il KDF ufficiale
+from src.thirdparty.deriveKeys import kdf
 
 def keylist_from_uid(uid_hex: str):
     """
     Restituisce una lista di 16 chiavi A (6 byte ciascuna) per i settori 0..15,
     usando il KDF della repo Bambu (deriveKeys.py).
     """
-    # derive_keys deve restituire 16 chiavi in esadecimale o bytes.
-    keys = derive_keys(uid_hex)  # adattare al nome/signature esatti
+    # kdf restituisce 16 chiavi in formato bytes
+    keys = kdf(bytes.fromhex(uid_hex))
     out = []
     for k in keys:
         if isinstance(k, str):

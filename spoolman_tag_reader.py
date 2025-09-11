@@ -34,7 +34,6 @@ def load_env(path: str = ".env") -> None:
 
 load_env()
 
-
 @dataclass
 class SpoolInfo:
     """Metadata decoded from a BambuLab spool tag."""

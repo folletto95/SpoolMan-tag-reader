@@ -1,5 +1,21 @@
 import struct
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+
+
+def _decode_blocks(uid_hex: str, blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Decodifica grezza dei blocchi usando l'UID della tag.
+
+    I dump letti senza autenticazione risultano cifrati; secondo la documentazione
+    pubblica, ogni byte va XORato con i byte dell'UID ripetuti.
+    """
+    uid = bytes.fromhex(uid_hex)
+    decoded = []
+    for blk in blocks:
+        data = bytearray.fromhex(blk["data"])
+        for i in range(len(data)):
+            data[i] ^= uid[i % len(uid)]
+        decoded.append({"index": blk["index"], "data": data.hex()})
+    return decoded
 
 def _hex_to_bytes(h: str) -> bytes:
     h = h.strip().lower()
@@ -20,11 +36,17 @@ def _safe_slice(b: bytes, start: int, end: int) -> bytes:
         return b""
     return b[start:end]
 
-def parse_blocks(blocks: List[Dict[str, Any]]) -> Dict[str, Any]:
+def parse_blocks(blocks: List[Dict[str, Any]], uid_hex: Optional[str] = None) -> Dict[str, Any]:
     """
-    Decodifica tag Bambu (Mifare Classic 1K) secondo le evidenze pubbliche (RFID-Tag-Guide).
-    Richiede l'array 'blocks' con elementi: {"index": int, "data": "<hex>"}
+    Decodifica i blocchi di una tag Bambu.
+
+    Se ``uid_hex`` è fornito, i dati dei blocchi vengono prima decifrati usando
+    l'UID secondo la logica descritta dal progetto RFID-Tag-Guide.
+    ``blocks`` deve essere una lista di ``{"index": int, "data": "<hex>"}``.
     """
+    if uid_hex:
+        blocks = _decode_blocks(uid_hex, blocks)
+
     by_idx: Dict[int, bytes] = {}
     for blk in blocks:
         by_idx[int(blk["index"])] = _hex_to_bytes(blk["data"])

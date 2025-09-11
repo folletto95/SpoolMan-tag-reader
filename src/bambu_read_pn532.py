@@ -2,8 +2,10 @@
 import sys, time, json, binascii
 import nfc
 
+
 # importa il KDF ufficiale
 from src.thirdparty.deriveKeys import kdf
+
 
 def keylist_from_uid(uid_hex: str):
     """

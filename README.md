@@ -1,30 +1,63 @@
-# SpoolMan-tag-reader
+# Bambu NFC Reader
 
-A simple Python utility to read the NFC tag attached to BambuLab filament spools and publish the decoded information to a [SpoolMan](https://github.com/Donkie/Spoolman) instance. The reader interface and API URL are configurable so the script works across different Linux distributions.
+Un tool per **leggere e catalogare le tag NFC delle bobine BambuLab** usando un **Raspberry Pi + PN532 USB**.
 
-## Requirements
+## 🚀 Setup
 
-Python 3 with the `venv` module. The helper script will create a local virtual environment in `.venv` and install:
+1. Clona la repo:
+   ```bash
+   git clone https://github.com/<tuo-utente>/bambu-nfc-reader.git
+   cd bambu-nfc-reader
+   ```
 
-* [nfcpy](https://nfcpy.readthedocs.io/) for accessing the PN532 reader
-* [requests](https://docs.python-requests.org/) for sending data to SpoolMan
+2. Crea un virtualenv:
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
 
-## Usage
+3. Installa le dipendenze:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-Copy `.env.example` to `.env` and adjust the settings for your environment:
+4. Collega il PN532 USB al Raspberry.
 
+## ▶️ Uso
+
+Esegui il lettore:
 ```bash
-cp .env.example .env
+python src/reader.py
 ```
 
-`SPOOLMAN_URL` sets the SpoolMan API endpoint and `PN532_DEVICE` can fix the reader interface (e.g. `usb` or `tty:USB0`). Set `PN532_DEVICE=auto` or leave it empty to let the script search for a reader automatically.
+Appoggia una bobina Bambu sul lettore. Verrà generato un file JSON con:
 
-Connect a PN532 reader and run:
+- UID della tag
+- Dump di tutti i blocchi disponibili
+- Decodifica dei campi noti (spool_id, materiale, colore, peso)
 
-```bash
-./run_spoolman_tag_reader.sh
+## 📂 Output
+
+Esempio `bambu_tag_20250910_123456.json`:
+```json
+{
+  "uid": "04a224b3d82180",
+  "blocks": [
+    {"index": 0, "data": "0411223344556677"},
+    {"index": 1, "data": "deadbeefcafebabe"}
+  ],
+  "parsed": {
+    "spool_id": "unknown",
+    "material": null,
+    "color": null,
+    "weight_grams": null,
+    "raw_hex": "0411223344556677deadbeefcafebabe"
+  }
+}
 ```
 
-On first run the script creates a `.venv` directory, installs dependencies, and loads configuration from `.env`. Command-line options `--device` and `--url` override the `.env` settings when supplied.
+## 🔮 Roadmap
 
-The script waits for a tag, decodes the contents, and POSTs the spool information to SpoolMan.
+- Espandere il parsing dei campi Bambu (materiale, colore, peso iniziale)
+- Integrazione diretta con Spoolman
+- Web UI per consultare il catalogo materiali

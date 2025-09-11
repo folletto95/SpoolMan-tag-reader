@@ -13,6 +13,7 @@ OUTPUT_FILE = f"bambu_tag_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
 RAW_FILE = OUTPUT_FILE.replace(".json", ".bin")
 DUMP_FILE = OUTPUT_FILE.replace(".json", ".dump.txt")
 
+
 def detect_device():
     """Try to auto-detect an NFC reader.
 
@@ -58,6 +59,32 @@ def on_connect(tag):
             block_hex = binascii.hexlify(data).decode().upper()
             blocks.append({"index": page // 4, "data": block_hex})
             page += 4
+    # In mancanza di read(), prova con dump() raggruppando ogni 16 byte
+    elif hasattr(tag, "dump"):
+        hexdigits = set(string.hexdigits)
+        buffer = ""
+        idx = 0
+        for line in tag.dump():
+            hex_chars = "".join(ch for ch in line if ch in hexdigits)
+            buffer += hex_chars.upper()
+            while len(buffer) >= 32:
+                blocks.append({"index": idx, "data": buffer[:32]})
+                buffer = buffer[32:]
+                idx += 1
+
+    # Se la lettura diretta non ha prodotto dati, prova con dump()
+    if not blocks and hasattr(tag, "dump"):
+        print("[WARN] Lettura diretta fallita, uso dump()")
+        hexdigits = set(string.hexdigits)
+        buffer = ""
+        idx = 0
+        for line in tag.dump():
+            hex_chars = "".join(ch for ch in line if ch in hexdigits)
+            buffer += hex_chars.upper()
+            while len(buffer) >= 32:
+                blocks.append({"index": idx, "data": buffer[:32]})
+                buffer = buffer[32:]
+                idx += 1
 
     # Prova comunque a catturare l'output di dump() per eventuali blocchi mancanti
     dump_lines = []
@@ -94,6 +121,7 @@ def on_connect(tag):
         print(f"[WARN] Nessun dato grezzo ottenuto, file vuoto {RAW_FILE}")
 
     parsed = parse_blocks(dump_data["blocks"])
+
     dump_data["parsed"] = parsed
     if parsed:
         print(f"[INFO] Decodificato: {parsed}")
@@ -107,6 +135,7 @@ def on_connect(tag):
             print(
                 "[WARN] Il primo blocco non coincide con l'UID: possibile lettura errata."
             )
+
 
     # Salva su file JSON
     with open(OUTPUT_FILE, "w") as f:

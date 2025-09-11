@@ -53,9 +53,14 @@ Appoggia una bobina Bambu sul lettore. Verrà generato un file JSON con:
 
 ## 📂 Output
 
-Oltre al file JSON viene generato anche `bambu_tag_YYYYMMDD_HHMMSS.bin` con i
-dati grezzi concatenati della tag, utile per verificare eventuali problemi di
-decodifica.
+Oltre al file JSON vengono generati:
+
+- `bambu_tag_YYYYMMDD_HHMMSS.bin` con i dati grezzi concatenati della tag
+- `bambu_tag_YYYYMMDD_HHMMSS.dump.txt` con l'output testuale di `dump()` del
+  lettore NFC
+
+Questi file aiutano a verificare eventuali problemi di lettura o decodifica.
+
 
 Esempio `bambu_tag_20250910_123456.json`:
 ```json

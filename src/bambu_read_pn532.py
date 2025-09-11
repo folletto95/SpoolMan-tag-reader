@@ -4,9 +4,20 @@ import nfc
 
 
 # importa il KDF ufficiale
-from src.thirdparty.deriveKeys import kdf
-from src.bambutag_parse import Tag as BambuTag
-from src.spoolman_formatter import tag_to_spoolman_payload
+try:
+    from thirdparty.deriveKeys import kdf
+except ModuleNotFoundError:  # support execution as package
+    from .thirdparty.deriveKeys import kdf
+
+try:
+    from bambutag_parse import Tag as BambuTag
+except ModuleNotFoundError:
+    from .bambutag_parse import Tag as BambuTag
+
+try:
+    from spoolman_formatter import tag_to_spoolman_payload
+except ModuleNotFoundError:
+    from .spoolman_formatter import tag_to_spoolman_payload
 
 
 def keylist_from_uid(uid_hex: str):
@@ -48,13 +59,11 @@ def read_mfc_with_keys(tag, keysA):
                 auth_ok = bool(tag.authenticate(blk, keyA, 0x60))
             except Exception:
                 pass
-
         if not auth_ok and hasattr(tag, "classic_auth_a"):
             try:
                 auth_ok = bool(tag.classic_auth_a(blk, keyA))
             except Exception:
                 pass
-
         if not auth_ok:
             continue
 
@@ -66,7 +75,6 @@ def read_mfc_with_keys(tag, keysA):
                 raw.extend(data)
         except Exception:
             pass
-
 
     return blocks, bytes(raw)
 

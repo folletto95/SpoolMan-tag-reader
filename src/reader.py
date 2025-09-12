@@ -36,6 +36,8 @@ GUIDE_ZIP = (
     "https://github.com/Bambu-Research-Group/RFID-Tag-Guide/archive/refs/heads/main.zip"
 )
 
+HERE = Path(__file__).resolve().parent
+DEFAULT_GUIDE = (HERE.parent / "RFID-Tag-Guide")  # cambia se l'hai altrove
 
 def sh(cmd, check: bool = True) -> subprocess.CompletedProcess:
     """Run *cmd* returning the CompletedProcess.
@@ -211,6 +213,7 @@ def main() -> None:
         action="store_true",
         help="Non cancellare il keys.dic temporaneo",
     )
+
     ap.add_argument(
         "--no-parse",
         dest="no_parse",
@@ -339,6 +342,10 @@ def main() -> None:
             except Exception:
                 pass
 
+    # Parse (opzionale)
+    if args.no_parse:
+        print("[INFO] parse.py disabilitato (--no-parse). Fine.")
+        sys.exit(0)
 
 if __name__ == "__main__":
     try:
@@ -347,3 +354,19 @@ if __name__ == "__main__":
         print("\n[INFO] Interrotto dall'utente.")
         sys.exit(130)
 
+    json_path = Path(f"{outstem}.json")
+    print(f"[INFO] Parsing → {json_path}")
+    try:
+        js = parse_mfd(str(mfd_path), parse_path)
+        json_path.write_text(js, encoding="utf-8")
+        print(f"[INFO] JSON salvato: {json_path}")
+    except Exception as e:
+        print(f"[ERR] parse.py fallito: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[INFO] Interrotto dall'utente.")
+        sys.exit(130)

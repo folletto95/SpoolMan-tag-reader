@@ -120,6 +120,7 @@ def handle_bambu_spool(device_str: str, out_stem: str) -> None:
         ]
         dump_lines = [f"{b['index']:03}: {b['data']}" for b in blocks]
         dump_file = f"{out_stem}.dump.txt"
+
         with open(dump_file, "w") as df:
             df.write("\n".join(dump_lines))
         print(f"[INFO] Dump testuale salvato in {dump_file}")

@@ -218,6 +218,7 @@ def main():
         print("[INFO] parse.py disabilitato (--no-parse). Fine.")
         sys.exit(0)
 
+        
     parse_path = find_file([parse_py])
     if not parse_path:
         print(f"[WARN] parse.py non trovato ({parse_py}). Salto conversione JSON.")
@@ -232,7 +233,6 @@ def main():
     except Exception as e:
         print(f"[ERR] parse.py fallito: {e}", file=sys.stderr)
         sys.exit(1)
-
 
 if __name__ == "__main__":
     try:

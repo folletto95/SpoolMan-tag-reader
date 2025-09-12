@@ -1,200 +1,349 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""BambuLab spool tag reader using libnfc utilities.
+
+This script reads BambuLab filament spool tags (MIFARE Classic 1K) using
+libnfc command-line tools. It can automatically fetch the RFID-Tag-Guide
+repository when missing to obtain ``deriveKeys.py`` and ``parse.py``.
+
+Workflow:
+1. Repeatedly call ``nfc-list -v`` until a tag UID is found.
+2. Derive sector keys via ``deriveKeys.py`` using the UID.
+3. Dump the tag with ``nfc-mfclassic``.
+4. Optionally parse the dump with ``parse.py`` to produce JSON.
+
+All intermediate paths are resolved to absolute paths to avoid issues with
+scripts that change their working directory.
+"""
+
 import argparse
-import glob
 import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import time
-import json
-import string
+import urllib.request
+import zipfile
+from pathlib import Path
 
-import nfc
+HERE = Path(__file__).resolve().parent
+DEFAULT_GUIDE = HERE.parent / "RFID-Tag-Guide"
+GUIDE_GIT = "https://github.com/Bambu-Research-Group/RFID-Tag-Guide"
+GUIDE_ZIP = (
+    "https://github.com/Bambu-Research-Group/RFID-Tag-Guide/archive/refs/heads/main.zip"
+)
 
-from parser import parse_blocks
-from bambu_read_pn532 import keylist_from_uid, read_mfc_with_keys
-from bambutag_parse import Tag as BambuTag
-from spoolman_formatter import tag_to_spoolman_payload
 
+def sh(cmd, check: bool = True) -> subprocess.CompletedProcess:
+    """Run *cmd* returning the CompletedProcess.
 
-def detect_device():
-    """Try to auto-detect an NFC reader.
-
-    Attempts USB first, then common serial interfaces like /dev/ttyUSB* or
-    /dev/ttyACM*. Returns a device string understood by nfcpy or ``None`` if no
-    reader is found.
+    Raises ``RuntimeError`` on non-zero exit code when ``check`` is True.
+    ``stdout`` and ``stderr`` are captured for diagnostics.
     """
 
-    candidates = ["usb"]
-    serial_globs = ("/dev/ttyUSB*", "/dev/ttyACM*")
-    for pattern in serial_globs:
-        for dev in glob.glob(pattern):
-            name = os.path.basename(dev)
-            if name.startswith("tty"):
-                name = name[3:]
-            candidates.append(f"tty:{name}:pn532")
-
-    for dev in candidates:
-        try:
-            with nfc.ContactlessFrontend(dev):
-                return dev
-        except Exception:
-            continue
-    return None
-
-
-def robust_dump(tag):
-    """Dump tag memory with extensive debug output.
-
-    The function prints every line returned by ``tag.dump()`` and, when
-    possible, reads the tag memory in 16-byte chunks using ``read_pages``.
-    A tuple ``(blocks, raw_bytes, dump_lines)`` is returned where ``blocks`` is
-    a list of ``{"index": int, "data": HEXSTR}`` dictionaries, ``raw_bytes``
-    contains the concatenated bytes of all blocks and ``dump_lines`` keeps the
-    raw text from ``tag.dump()`` for troubleshooting.
-    """
-
-    dump_lines = []
-    if hasattr(tag, "dump"):
-        lines = tag.dump()
-        for i, ln in enumerate(lines):
-            print(f"[DBG] {i}: {ln}")
-            dump_lines.append(ln)
-
-    blocks = []
-    raw_bytes = b""
-
-    if hasattr(tag, "read_pages"):
-        idx = 0
-        page = 0
-        while True:
-            try:
-                data = tag.read_pages(page)  # 16B = 4 pagine
-            except Exception:
-                break
-            if not data:
-                break
-            print(f"[DBG] page {page}-{page+3}: {data.hex()}")
-            hex_data = data.hex().upper()
-            blocks.append({"index": idx, "data": hex_data})
-            raw_bytes += data
-            idx += 1
-            page += 4
-    elif dump_lines:
-        hexdigits = set(string.hexdigits)
-        for idx, line in enumerate(dump_lines):
-            hex_chars = "".join(ch for ch in line if ch in hexdigits)
-            block_hex = hex_chars.upper().ljust(32, "0")[:32]
-            if not block_hex:
-                continue
-            blocks.append({"index": idx, "data": block_hex})
-            try:
-                raw_bytes += bytes.fromhex(block_hex)
-            except ValueError:
-                pass
-
-    return blocks, raw_bytes, dump_lines
-
-
-def on_connect(tag):
-    uid_hex = getattr(tag, "identifier", b"").hex().upper()
-    print(f"[INFO] Tag trovato: {tag}")
-
-    blocks: list[dict] = []
-    raw_bytes = b""
-    dump_lines: list[str] = []
-
-    # prova prima la lettura autenticata MIFARE Classic
-    try:
-        keys = keylist_from_uid(uid_hex)
-        blocks, raw_bytes = read_mfc_with_keys(tag, keys)
-    except Exception as e:
-        print(f"[DBG] Lettura MIFARE autenticata fallita: {e}")
-
-    # se la lettura autenticata non produce dati, usa il fallback generico
-    if not raw_bytes:
-        blocks, raw_bytes, dump_lines = robust_dump(tag)
-    else:
-        for blk in blocks:
-            dump_lines.append(f"{blk['index']:03}: {blk['data']}")
-
-    print(f"[INFO] Blocchi estratti: {len(blocks)}  Bytes totali: {len(raw_bytes)}")
-
-    ts = time.strftime("%Y%m%d_%H%M%S")
-    base = f"bambu_tag_{ts}"
-    bin_file = base + ".bin"
-    dump_file = base + ".dump.txt"
-    json_file = base + ".json"
-    spool_file = base + ".spoolman.json"
-
-    if raw_bytes:
-        with open(bin_file, "wb") as rf:
-            rf.write(raw_bytes)
-        print(f"[INFO] Dati grezzi salvati in {bin_file}")
-    else:
-        print("[WARN] Nessun dato grezzo salvato (dump vuoto)")
-
-    if dump_lines:
-        with open(dump_file, "w") as df:
-            df.write("\n".join(dump_lines))
-        print(f"[INFO] Dump testuale salvato in {dump_file}")
-
-    out_json = {"uid": uid_hex, "blocks": blocks}
-
-    try:
-        tag_obj = BambuTag(bin_file, raw_bytes)
-        spool_data = tag_to_spoolman_payload(tag_obj)
-        out_json["spoolman"] = spool_data
-        with open(spool_file, "w") as sf:
-            json.dump(spool_data, sf, indent=2)
-        print(f"[INFO] Dati Spoolman salvati in {spool_file}")
-    except Exception as e:
-        print(f"[WARN] Impossibile estrarre dati Spoolman: {e}")
-
-    try:
-        out_json["parsed"] = parse_blocks(blocks)
-    except Exception as e:
-        print(f"[WARN] parse_blocks fallito: {e}")
-
-    with open(json_file, "w") as f:
-        json.dump(out_json, f, indent=2)
-    print(f"[INFO] JSON salvato in {json_file}")
-    return True
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Legge le tag NFC delle bobine BambuLab"
-    )
-    parser.add_argument(
-        "--device",
-        help="stringa dispositivo nfcpy (es. 'usb' o 'tty:USB0:pn532')",
-    )
-    args = parser.parse_args()
-
-    device = args.device or os.environ.get("NFC_DEVICE") or detect_device()
-    if device is None:
-        print(
-            "[ERROR] Nessun lettore NFC trovato. Specifica --device o variabile NFC_DEVICE."
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if check and proc.returncode != 0:
+        raise RuntimeError(
+            f"Command failed ({proc.returncode}): {' '.join(cmd)}\n"
+            f"--- STDOUT ---\n{proc.stdout}\n--- STDERR ---\n{proc.stderr}"
         )
-        return
+    return proc
 
-    attempts = [device]
-    if device and not device.startswith("usb"):
-        attempts.append("usb")  # fallback CCID/PCSC
 
-    last_err = None
-    for dev in attempts:
-        print(f"[INFO] Provo ad aprire NFC device '{dev}'...")
-        try:
-            with nfc.ContactlessFrontend(dev) as clf:
-                clf.connect(rdwr={"on-connect": on_connect})
-                return
-        except Exception as e:
-            print(f"[WARN] Apertura fallita su '{dev}': {e}")
-            last_err = e
+def timestamp() -> str:
+    return time.strftime("%Y%m%d_%H%M%S")
 
-    raise SystemExit(
-        f"[ERROR] Nessun lettore NFC utilizzabile. Ultimo errore: {last_err}"
+
+UID_PATTERNS = [
+    re.compile(
+        r"UID\s*\(NFCID1\)\s*:\s*([0-9A-Fa-f]{2}(?:\s+[0-9A-Fa-f]{2}){3,10})"
+    ),
+    re.compile(r"NFCID1\s*:\s*([0-9A-Fa-f]{2}(?:\s+[0-9A-Fa-f]{2}){3,10})"),
+]
+
+
+def get_uid_once() -> tuple[str | None, bool, str | None, str | None, str]:
+    """Run ``nfc-list -v`` once and try to extract UID and tag info."""
+
+    proc = sh(["nfc-list", "-v"], check=False)
+    out = (proc.stdout or "") + (proc.stderr or "")
+
+    uid_hex = None
+    for pat in UID_PATTERNS:
+        m = pat.search(out)
+        if m:
+            uid_hex = m.group(1).replace(" ", "").upper()
+            break
+
+    atqa = None
+    sak = None
+    m1k = False
+
+    m = re.search(r"ATQA\s*:\s*(0x[0-9A-Fa-f]+)", out)
+    if m:
+        atqa = m.group(1).upper()
+    m = re.search(r"SAK\s*:\s*(0x[0-9A-Fa-f]+)", out)
+    if m:
+        sak = m.group(1).upper()
+
+    if re.search(r"MIFARE\s+Classic\s+1K", out, re.IGNORECASE):
+        m1k = True
+    elif atqa == "0x0004" and sak in {"0x08", "0x09"}:
+        m1k = True
+
+    return uid_hex, m1k, atqa, sak, out
+
+
+def scan_uid_until(timeout_s: float = 8.0, interval_s: float = 0.3) -> tuple[str, bool, str | None, str | None]:
+    """Repeatedly call ``nfc-list`` until UID found or timeout."""
+
+    start = time.time()
+    last_out = ""
+    while time.time() - start < timeout_s:
+        uid, m1k, atqa, sak, out = get_uid_once()
+        last_out = out
+        if uid:
+            return uid, m1k, atqa, sak
+        time.sleep(interval_s)
+    raise RuntimeError(
+        "Impossibile estrarre UID: nessun tag rilevato.\n"
+        f"Output finale nfc-list:\n{last_out}"
     )
+
+
+def ensure_guide_repo(guide_dir: Path, auto_fetch: bool = True) -> tuple[str, str]:
+    """Return absolute paths to deriveKeys.py and parse.py.
+
+    If missing and ``auto_fetch`` is True, clone or download the repository.
+    """
+
+    derive_py = guide_dir / "deriveKeys.py"
+    parse_py = guide_dir / "parse.py"
+    if derive_py.exists() and parse_py.exists():
+        return str(derive_py.resolve()), str(parse_py.resolve())
+
+    if not auto_fetch:
+        raise FileNotFoundError(f"RFID-Tag-Guide non trovato in {guide_dir}")
+
+    guide_dir = guide_dir.resolve()
+    guide_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    # Attempt git clone first
+    if shutil.which("git"):
+        try:
+            print(f"[INFO] Clono {GUIDE_GIT} in {guide_dir}…")
+            sh(["git", "clone", "--depth", "1", GUIDE_GIT, str(guide_dir)])
+        except Exception as e:
+            print(f"[WARN] git clone fallito: {e}. Provo download zip…")
+
+    # If still missing, download ZIP
+    if not (derive_py.exists() and parse_py.exists()):
+        with tempfile.TemporaryDirectory() as td:
+            zip_path = Path(td) / "guide.zip"
+            print(f"[INFO] Scarico ZIP {GUIDE_ZIP} …")
+            urllib.request.urlretrieve(GUIDE_ZIP, zip_path)
+            print("[INFO] Estraggo ZIP…")
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(Path(td))
+            roots = [p for p in Path(td).iterdir() if p.is_dir()]
+            if not roots:
+                raise RuntimeError("ZIP estratto ma cartella non trovata")
+            extracted = max(roots, key=lambda p: len(list(p.rglob("*"))))
+            guide_dir.mkdir(parents=True, exist_ok=True)
+            for item in extracted.iterdir():
+                dest = guide_dir / item.name
+                if item.is_dir():
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    shutil.copytree(item, dest)
+                else:
+                    shutil.copy2(item, dest)
+
+    if not (derive_py.exists() and parse_py.exists()):
+        raise FileNotFoundError(
+            f"Impossibile preparare RFID-Tag-Guide in {guide_dir}"
+        )
+
+    return str(derive_py.resolve()), str(parse_py.resolve())
+
+
+def derive_keys(uid_hex: str, derive_py_abs: str) -> str:
+    """Run ``deriveKeys.py`` and write keys to a temporary file."""
+
+    proc = sh(["python3", derive_py_abs, uid_hex], check=True)
+    tmp = tempfile.NamedTemporaryFile(prefix="keys_", suffix=".dic", delete=False, mode="w")
+    tmp.write(proc.stdout)
+    tmp.close()
+    return tmp.name
+
+
+def nfclassic_dump(out_mfd_abs: str, keys_dic_path: str) -> None:
+    """Dump the tag with ``nfc-mfclassic``."""
+
+    sh(["nfc-mfclassic", "r", "a", out_mfd_abs, keys_dic_path], check=True)
+
+
+def parse_mfd(mfd_abs: str, parse_py_abs: str) -> str:
+    """Parse an ``.mfd`` dump via ``parse.py``."""
+
+    proc = sh(["python3", parse_py_abs, mfd_abs], check=True)
+    return proc.stdout
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(
+        description="Bambu MIFARE Classic 1K reader (solo libnfc, auto-fetch guida)"
+    )
+    ap.add_argument(
+        "--guide",
+        default=str(DEFAULT_GUIDE),
+        help="Percorso della cartella RFID-Tag-Guide (verrà creata se manca)",
+    )
+    ap.add_argument("--derive", default=None, help="Path a deriveKeys.py (opzionale)")
+    ap.add_argument("--parse", default=None, help="Path a parse.py (opzionale)")
+    ap.add_argument("--keys", default=None, help="Usa questo keys.dic e salta deriveKeys.py")
+    ap.add_argument(
+        "--keep-keys",
+        dest="keep_keys",
+        action="store_true",
+        help="Non cancellare il keys.dic temporaneo",
+    )
+    ap.add_argument(
+        "--no-parse",
+        dest="no_parse",
+        action="store_true",
+        help="Non eseguire parse.py (lascia solo .mfd)",
+    )
+    ap.add_argument(
+        "--only-parse",
+        dest="only_parse",
+        default=None,
+        help="Salta la lettura: esegue solo parse.py su questo .mfd (consigliato path assoluto)",
+    )
+    ap.add_argument(
+        "--outstem",
+        default=None,
+        help="Prefisso output (default: bambu_tag_<timestamp>)",
+    )
+    ap.add_argument(
+        "--no-auto-fetch",
+        dest="auto_fetch",
+        action="store_false",
+        help="Non scaricare automaticamente RFID-Tag-Guide se manca",
+    )
+    ap.set_defaults(auto_fetch=True)
+    ap.add_argument(
+        "--scan-timeout",
+        type=float,
+        default=8.0,
+        help="Secondi massimi per trovare l'UID con nfc-list (default: 8.0)",
+    )
+    args = ap.parse_args()
+
+    # Parse existing dump only
+    if args.only_parse:
+        mfd = Path(args.only_parse).resolve()
+        if not mfd.exists():
+            print(f"[ERR] MFD non trovato: {mfd}", file=sys.stderr)
+            sys.exit(2)
+
+        if args.no_parse:
+            print("[ERR] --only-parse e --no-parse sono incompatibili.", file=sys.stderr)
+            sys.exit(2)
+
+        if args.parse:
+            parse_py_abs = str(Path(args.parse).resolve())
+        else:
+            _, parse_py_abs = ensure_guide_repo(
+                Path(args.guide), auto_fetch=args.auto_fetch
+            )
+
+        outstem = args.outstem or f"bambu_tag_{timestamp()}"
+        json_path = Path(f"{outstem}.json").resolve()
+        print(f"[INFO] Parsing {mfd} → {json_path}")
+        try:
+            js = parse_mfd(str(mfd), parse_py_abs)
+            json_path.write_text(js, encoding="utf-8")
+            print(f"[INFO] JSON salvato in {json_path}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"[ERR] parse.py fallito: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Live reading
+    print("[INFO] Interrogo il reader (scan UID)…")
+    try:
+        uid_hex, m1k, atqa, sak = scan_uid_until(timeout_s=args.scan_timeout)
+    except Exception as e:
+        print(f"[ERR] {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"[INFO] UID: {uid_hex}")
+    if not m1k:
+        print(
+            f"[WARN] Il tag non appare come MIFARE Classic 1K (ATQA={atqa}, SAK={sak}). Procedo comunque."
+        )
+
+    outstem = args.outstem or f"bambu_tag_{timestamp()}"
+    mfd_path = Path(f"{outstem}.mfd").resolve()
+
+    # Prepare derive/parse
+    if args.keys:
+        keys_path = Path(args.keys).resolve()
+        if not keys_path.exists():
+            print(f"[ERR] keys.dic non trovato: {keys_path}", file=sys.stderr)
+            sys.exit(2)
+        parse_py_abs = (
+            str(Path(args.parse).resolve())
+            if args.parse
+            else ensure_guide_repo(Path(args.guide), auto_fetch=args.auto_fetch)[1]
+        )
+    else:
+        derive_py_abs, parse_py_abs = ensure_guide_repo(
+            Path(args.guide), auto_fetch=args.auto_fetch
+        )
+
+    temp_keys = None
+    try:
+        if args.keys:
+            keys_dic_abs = str(keys_path)
+        else:
+            print("[INFO] Derivo chiavi dall'UID…")
+            keys_dic_abs = derive_keys(uid_hex, derive_py_abs)
+            temp_keys = keys_dic_abs
+
+        print(f"[INFO] Dump MIFARE → {mfd_path.name}")
+        nfclassic_dump(str(mfd_path), keys_dic_abs)
+        print(f"[INFO] Dump salvato: {mfd_path}")
+
+        if args.no_parse:
+            print("[INFO] parse.py disabilitato (--no-parse). Fine.")
+            return
+
+        json_path = Path(f"{outstem}.json").resolve()
+        print(f"[INFO] Parsing → {json_path.name}")
+        js = parse_mfd(str(mfd_path), parse_py_abs)
+        json_path.write_text(js, encoding="utf-8")
+        print(f"[INFO] JSON salvato: {json_path}")
+
+    except Exception as e:
+        print(f"[ERR] Operazione fallita: {e}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        if temp_keys and not args.keep_keys:
+            try:
+                os.remove(temp_keys)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[INFO] Interrotto dall'utente.")
+        sys.exit(130)
 

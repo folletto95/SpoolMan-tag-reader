@@ -79,6 +79,15 @@ def read_mfc_with_keys(tag, keysA):
                 auth_ok = bool(rsp and rsp[0] == 0x00)
             except Exception:
                 pass
+
+        # 2) fallback a scambio raw via PN532
+        if not auth_ok and clf is not None and uid:
+            try:
+                cmd = bytearray([0x60, blk]) + keyA + uid[:4]
+                rsp = clf.exchange(cmd)
+                auth_ok = bool(rsp and rsp[0] == 0x00)
+            except Exception:
+                pass
         if not auth_ok:
             continue
 

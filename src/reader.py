@@ -4,11 +4,14 @@ import os
 import time
 import json
 import string
+import subprocess
+import tempfile
+import shutil
 
 import nfc
 
 from parser import parse_blocks
-from bambu_read_pn532 import keylist_from_uid, read_mfc_with_keys
+from bambu_read_pn532 import keylist_from_uid
 from bambutag_parse import Tag as BambuTag
 from spoolman_formatter import tag_to_spoolman_payload
 
@@ -92,29 +95,45 @@ def robust_dump(tag):
     return blocks, raw_bytes, dump_lines
 
 
+def dump_with_libnfc(uid_hex: str, outfile: str):
+    """Use libnfc's ``nfc-mfclassic`` to dump a MIFARE Classic tag.
+
+    ``uid_hex`` is the tag UID as hex string, ``outfile`` is the path where the
+    binary dump will be written. Returns ``(blocks, raw_bytes)``.
+    """
+
+    keys = keylist_from_uid(uid_hex)
+    with tempfile.NamedTemporaryFile("w", delete=False) as kf:
+        for k in keys:
+            line = k.hex().upper() if isinstance(k, bytes) else bytes(k).hex().upper()
+            kf.write(line + "\n")
+        keyfile = kf.name
+    try:
+        subprocess.run(
+            ["nfc-mfclassic", "r", "a", outfile, keyfile],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        os.unlink(keyfile)
+
+    with open(outfile, "rb") as f:
+        raw = f.read()
+
+    blocks = []
+    for i in range(0, len(raw), 16):
+        chunk = raw[i : i + 16]
+        if len(chunk) < 16:
+            break
+        blocks.append({"index": i // 16, "data": chunk.hex().upper()})
+
+    return blocks, raw
+
+
 def on_connect(tag):
     uid_hex = getattr(tag, "identifier", b"").hex().upper()
     print(f"[INFO] Tag trovato: {tag}")
-
-    blocks: list[dict] = []
-    raw_bytes = b""
-    dump_lines: list[str] = []
-
-    # prova prima la lettura autenticata MIFARE Classic
-    try:
-        keys = keylist_from_uid(uid_hex)
-        blocks, raw_bytes = read_mfc_with_keys(tag, keys)
-    except Exception as e:
-        print(f"[DBG] Lettura MIFARE autenticata fallita: {e}")
-
-    # se la lettura autenticata non produce dati, usa il fallback generico
-    if not raw_bytes:
-        blocks, raw_bytes, dump_lines = robust_dump(tag)
-    else:
-        for blk in blocks:
-            dump_lines.append(f"{blk['index']:03}: {blk['data']}")
-
-    print(f"[INFO] Blocchi estratti: {len(blocks)}  Bytes totali: {len(raw_bytes)}")
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     base = f"bambu_tag_{ts}"
@@ -122,6 +141,21 @@ def on_connect(tag):
     dump_file = base + ".dump.txt"
     json_file = base + ".json"
     spool_file = base + ".spoolman.json"
+
+    # primo tentativo: dump generico con nfcpy
+    blocks, raw_bytes, dump_lines = robust_dump(tag)
+
+    # se sembra una MIFARE Classic ma abbiamo letto solo 4 blocchi, prova libnfc
+    is_classic = getattr(tag, "sak", 0) in (0x08, 0x18)
+    if (is_classic or len(raw_bytes) <= 64) and shutil.which("nfc-mfclassic"):
+        try:
+            blocks, raw_bytes = dump_with_libnfc(uid_hex, bin_file)
+            dump_lines = [f"{b['index']:03}: {b['data']}" for b in blocks]
+            print("[DBG] Dump ottenuto tramite nfc-mfclassic")
+        except Exception as e:
+            print(f"[WARN] Lettura con nfc-mfclassic fallita: {e}")
+
+    print(f"[INFO] Blocchi estratti: {len(blocks)}  Bytes totali: {len(raw_bytes)}")
 
     if raw_bytes:
         with open(bin_file, "wb") as rf:

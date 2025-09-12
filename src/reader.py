@@ -14,8 +14,8 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_GUIDE = (HERE.parent / "RFID-Tag-Guide")  # cambia se l'hai altrove
 
 
-def sh(cmd, check=True):
-    p = subprocess.run(cmd, capture_output=True, text=True)
+def sh(cmd, check=True, env=None):
+    p = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if check and p.returncode != 0:
         raise RuntimeError(
             f"Command failed ({p.returncode}): {' '.join(cmd)}\n--- STDOUT ---\n{p.stdout}\n--- STDERR ---\n{p.stderr}"
@@ -40,14 +40,14 @@ UID_PATTERNS = [
 ]
 
 
-def get_uid_and_info():
+def get_uid_and_info(env=None):
     """
     Esegue `nfc-list -v` e prova ad estrarre:
       - UID/NFCID1
       - indicazione di tipo MIFARE Classic 1K (se presente)
       - ATQA/SAK (per diagnosi)
     """
-    p = sh(["nfc-list", "-v"], check=False)  # non fallire, vogliamo vedere output
+    p = sh(["nfc-list", "-v"], check=False, env=env)  # non fallire, vogliamo vedere output
     out = (p.stdout or "") + (p.stderr or "")
 
     uid_hex = None
@@ -86,9 +86,9 @@ def derive_keys(uid_hex, derive_py):
     return tmp.name
 
 
-def nfclassic_dump(out_mfd, keys_dic):
+def nfclassic_dump(out_mfd, keys_dic, env=None):
     # nfc-mfclassic r a <dumpfile> <keysfile>
-    sh(["nfc-mfclassic", "r", "a", out_mfd, keys_dic], check=True)
+    sh(["nfc-mfclassic", "r", "a", out_mfd, keys_dic], check=True, env=env)
 
 
 def parse_mfd(mfd_path, parse_py):
@@ -103,9 +103,24 @@ def main():
     ap.add_argument("--parse", default=None, help="Path a parse.py (se diverso da --guide)")
     ap.add_argument("--keys", default=None, help="Usa questo keys.dic (salta deriveKeys.py)")
     ap.add_argument("--keep-keys", action="store_true", help="Non cancellare il file keys.dic temporaneo")
-    ap.add_argument("--no-parse", action="store_true", help="Non eseguire parse.py (lascia solo .mfd)")
-    ap.add_argument("--only-parse", default=None, help="Salta la lettura: esegue solo parse.py su questo .mfd")
+    ap.add_argument(
+        "--no-parse",
+        dest="no_parse",
+        action="store_true",
+        help="Non eseguire parse.py (lascia solo .mfd)",
+    )
+    ap.add_argument(
+        "--only-parse",
+        dest="only_parse",
+        default=None,
+        help="Salta la lettura: esegue solo parse.py su questo .mfd",
+    )
     ap.add_argument("--outstem", default=None, help="Prefisso output (default: bambu_tag_<timestamp>)")
+    ap.add_argument(
+        "--device",
+        default=None,
+        help="Connstring libnfc (es. pn532_uart:/dev/ttyUSB0:115200)",
+    )
     args = ap.parse_args()
 
     # Risolvi derive/parse
@@ -113,12 +128,12 @@ def main():
     derive_py = args.derive or str(guide / "deriveKeys.py")
     parse_py = args.parse or str(guide / "parse.py")
 
-    if args.only-parse:
-        mfd = Path(args.only-parse)
+    if args.only_parse:
+        mfd = Path(args.only_parse)
         if not mfd.exists():
             print(f"[ERR] MFD non trovato: {mfd}", file=sys.stderr)
             sys.exit(2)
-        if args.no-parse:
+        if args.no_parse:
             print("[ERR] --only-parse e --no-parse sono incompatibili.", file=sys.stderr)
             sys.exit(2)
         if not Path(parse_py).exists():
@@ -139,7 +154,12 @@ def main():
 
     # Lettura live
     print("[INFO] Interrogo il reader con nfc-list -v…")
-    uid_hex, m1k, atqa, sak, raw = get_uid_and_info()
+    env = os.environ.copy()
+    if args.device:
+        env["LIBNFC_DEVICE"] = args.device
+        env["NFC_DEVICE"] = args.device
+
+    uid_hex, m1k, atqa, sak, raw = get_uid_and_info(env)
 
     if uid_hex:
         print(f"[INFO] UID: {uid_hex}")
@@ -177,7 +197,7 @@ def main():
     # Dump
     print(f"[INFO] Dump MIFARE → {mfd_path}")
     try:
-        nfclassic_dump(str(mfd_path), keys_path)
+        nfclassic_dump(str(mfd_path), keys_path, env)
         print(f"[INFO] Dump salvato: {mfd_path}")
     except Exception as e:
         print(f"[ERR] nfc-mfclassic fallito: {e}", file=sys.stderr)
@@ -187,17 +207,18 @@ def main():
             print("[HINT] Verifica le chiavi derivate. UID corretto? Tag compatibile/famiglia FM11RF08S?", file=sys.stderr)
         sys.exit(1)
     finally:
-        if temp_keys and not args.keep-keys:
+        if temp_keys and not args.keep_keys:
             try:
                 os.remove(temp_keys)
             except Exception:
                 pass
 
     # Parse (opzionale)
-    if args.no-parse:
+    if args.no_parse:
         print("[INFO] parse.py disabilitato (--no-parse). Fine.")
         sys.exit(0)
 
+        
     parse_path = find_file([parse_py])
     if not parse_path:
         print(f"[WARN] parse.py non trovato ({parse_py}). Salto conversione JSON.")
@@ -212,7 +233,6 @@ def main():
     except Exception as e:
         print(f"[ERR] parse.py fallito: {e}", file=sys.stderr)
         sys.exit(1)
-
 
 if __name__ == "__main__":
     try:

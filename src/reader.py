@@ -18,6 +18,7 @@ scripts that change their working directory.
 """
 
 import argparse
+import logging
 import os
 import re
 import shutil
@@ -176,6 +177,7 @@ def derive_keys(uid_hex: str, derive_py_abs: str) -> str:
     tmp = tempfile.NamedTemporaryFile(prefix="keys_", suffix=".dic", delete=False, mode="w")
     tmp.write(proc.stdout)
     tmp.close()
+    logging.debug("Chiavi derivate salvate in %s:\n%s", tmp.name, proc.stdout.strip())
     return tmp.name
 
 
@@ -187,16 +189,24 @@ def nfclassic_dump(out_mfd_abs: str, keys_dic_path: str) -> subprocess.Completed
     """
 
     proc = sh(["nfc-mfclassic", "r", "a", out_mfd_abs, keys_dic_path], check=False)
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"nfc-mfclassic failed ({proc.returncode})\n"
-            f"--- STDOUT ---\n{proc.stdout}\n--- STDERR ---\n{proc.stderr}"
-        )
+    out_combined = proc.stdout + proc.stderr
 
-    out_combined = (proc.stdout + proc.stderr).lower()
-    if "authentication failed" in out_combined:
+    if proc.returncode != 0 or "authentication failed" in out_combined.lower():
+        m_block = re.search(r"block\s+(0x[0-9A-Fa-f]+|\d+)", out_combined, re.IGNORECASE)
+        m_sector = re.search(r"sector\s+(0x[0-9A-Fa-f]+|\d+)", out_combined, re.IGNORECASE)
+
+        if m_block:
+            block_val = int(m_block.group(1), 0)
+            sector_val = block_val // 4
+            where = f"block {block_val} (0x{block_val:02X}, sector {sector_val})"
+        elif m_sector:
+            sector_val = int(m_sector.group(1), 0)
+            where = f"sector {sector_val}"
+        else:
+            where = "sconosciuto"
+
         raise RuntimeError(
-            "Autenticazione al tag fallita (chiavi errate?).\n"
+            f"Autenticazione al tag fallita su {where}.\n"
             f"--- STDOUT ---\n{proc.stdout}\n--- STDERR ---\n{proc.stderr}"
         )
 
@@ -259,7 +269,13 @@ def main() -> None:
         default=8.0,
         help="Secondi massimi per trovare l'UID con nfc-list (default: 8.0)",
     )
+    ap.add_argument("--debug", action="store_true", help="Abilita messaggi di debug")
     args = ap.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="[%(levelname)s] %(message)s",
+    )
 
     guide_path = Path(args.guide)
     derive_py_abs: str | None = None

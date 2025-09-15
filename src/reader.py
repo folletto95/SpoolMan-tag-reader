@@ -19,6 +19,7 @@ scripts that change their working directory.
 
 import argparse
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -172,12 +173,11 @@ def derive_keys(uid_hex: str, derive_py_abs: str) -> str:
     """Run ``deriveKeys.py`` and save keys to ``keys_<UID>.dic``."""
 
     proc = sh(["python3", derive_py_abs, uid_hex], check=True)
-    keys_path = Path(f"keys_{uid_hex}.dic").resolve()
-    keys_path.write_text(proc.stdout, encoding="utf-8")
-    logging.debug(
-        "Chiavi derivate salvate in %s:\n%s", keys_path, proc.stdout.strip()
-    )
-    return str(keys_path)
+    tmp = tempfile.NamedTemporaryFile(prefix="keys_", suffix=".dic", delete=False, mode="w")
+    tmp.write(proc.stdout)
+    tmp.close()
+    logging.debug("Chiavi derivate salvate in %s:\n%s", tmp.name, proc.stdout.strip())
+    return tmp.name
 
 
 def nfclassic_dump(out_mfd_abs: str, keys_dic_path: str) -> subprocess.CompletedProcess:
@@ -191,8 +191,19 @@ def nfclassic_dump(out_mfd_abs: str, keys_dic_path: str) -> subprocess.Completed
     out_combined = proc.stdout + proc.stderr
 
     if proc.returncode != 0 or "authentication failed" in out_combined.lower():
-        m = re.search(r"(sector|block)\s+([0-9A-Fa-fx]+)", out_combined, re.IGNORECASE)
-        where = f"{m.group(1)} {m.group(2)}" if m else "sconosciuto"
+        m_block = re.search(r"block\s+(0x[0-9A-Fa-f]+|\d+)", out_combined, re.IGNORECASE)
+        m_sector = re.search(r"sector\s+(0x[0-9A-Fa-f]+|\d+)", out_combined, re.IGNORECASE)
+
+        if m_block:
+            block_val = int(m_block.group(1), 0)
+            sector_val = block_val // 4
+            where = f"block {block_val} (0x{block_val:02X}, sector {sector_val})"
+        elif m_sector:
+            sector_val = int(m_sector.group(1), 0)
+            where = f"sector {sector_val}"
+        else:
+            where = "sconosciuto"
+
         raise RuntimeError(
             f"Autenticazione al tag fallita su {where}.\n"
             f"--- STDOUT ---\n{proc.stdout}\n--- STDERR ---\n{proc.stderr}"

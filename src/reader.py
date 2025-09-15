@@ -24,7 +24,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 import zipfile
@@ -171,7 +170,7 @@ def ensure_guide_repo(guide_dir: Path, auto_fetch: bool = True) -> tuple[str, st
 
 
 def derive_keys(uid_hex: str, derive_py_abs: str) -> str:
-    """Run ``deriveKeys.py`` and write keys to a temporary file."""
+    """Run ``deriveKeys.py`` and save keys to ``keys_<UID>.dic``."""
 
     proc = sh(["python3", derive_py_abs, uid_hex], check=True)
     tmp = tempfile.NamedTemporaryFile(prefix="keys_", suffix=".dic", delete=False, mode="w")
@@ -232,12 +231,6 @@ def main() -> None:
     ap.add_argument("--derive", default=None, help="Path a deriveKeys.py (opzionale)")
     ap.add_argument("--parse", default=None, help="Path a parse.py (opzionale)")
     ap.add_argument("--keys", default=None, help="Usa questo keys.dic e salta deriveKeys.py")
-    ap.add_argument(
-        "--keep-keys",
-        dest="keep_keys",
-        action="store_true",
-        help="Non cancellare il keys.dic temporaneo",
-    )
 
     ap.add_argument(
         "--no-parse",
@@ -361,16 +354,13 @@ def main() -> None:
         if not keys_path.exists():
             print(f"[ERR] keys.dic non trovato: {keys_path}", file=sys.stderr)
             sys.exit(2)
+        keys_dic_abs = str(keys_path)
+    else:
+        print("[INFO] Derivo chiavi dall'UID…")
+        keys_dic_abs = derive_keys(uid_hex, derive_py_abs)  # type: ignore[arg-type]
+        print(f"[INFO] keys.dic salvato: {keys_dic_abs}")
 
-    temp_keys = None
     try:
-        if args.keys:
-            keys_dic_abs = str(keys_path)
-        else:
-            print("[INFO] Derivo chiavi dall'UID…")
-            keys_dic_abs = derive_keys(uid_hex, derive_py_abs)  # type: ignore[arg-type]
-            temp_keys = keys_dic_abs
-
         print(f"[INFO] Dump MIFARE → {mfd_path.name}")
         proc = nfclassic_dump(str(mfd_path), keys_dic_abs)
         if not mfd_path.exists():
@@ -393,12 +383,6 @@ def main() -> None:
     except Exception as e:
         print(f"[ERR] Operazione fallita: {e}", file=sys.stderr)
         sys.exit(1)
-    finally:
-        if temp_keys and not args.keep_keys:
-            try:
-                os.remove(temp_keys)
-            except Exception:
-                pass
 
 if __name__ == "__main__":
     try:

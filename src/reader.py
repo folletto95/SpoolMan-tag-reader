@@ -179,10 +179,10 @@ def derive_keys(uid_hex: str, derive_py_abs: str) -> str:
     return tmp.name
 
 
-def nfclassic_dump(out_mfd_abs: str, keys_dic_path: str) -> None:
-    """Dump the tag with ``nfc-mfclassic``."""
+def nfclassic_dump(out_mfd_abs: str, keys_dic_path: str) -> subprocess.CompletedProcess:
+    """Dump the tag with ``nfc-mfclassic`` and return the process."""
 
-    sh(["nfc-mfclassic", "r", "a", out_mfd_abs, keys_dic_path], check=True)
+    return sh(["nfc-mfclassic", "r", "a", out_mfd_abs, keys_dic_path], check=True)
 
 
 def parse_mfd(mfd_abs: str, parse_py_abs: str) -> str:
@@ -338,7 +338,12 @@ def main() -> None:
             temp_keys = keys_dic_abs
 
         print(f"[INFO] Dump MIFARE → {mfd_path.name}")
-        nfclassic_dump(str(mfd_path), keys_dic_abs)
+        proc = nfclassic_dump(str(mfd_path), keys_dic_abs)
+        if not mfd_path.exists():
+            raise RuntimeError(
+                f"nfc-mfclassic non ha creato il dump {mfd_path}\n"
+                f"--- STDOUT ---\n{proc.stdout}\n--- STDERR ---\n{proc.stderr}"
+            )
         print(f"[INFO] Dump salvato: {mfd_path}")
 
         if args.no_parse:

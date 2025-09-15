@@ -18,12 +18,12 @@ scripts that change their working directory.
 """
 
 import argparse
+import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.request
 import zipfile
@@ -196,6 +196,7 @@ def derive_keys(
     )
     tmp.write(proc.stdout)
     tmp.close()
+    logging.debug("Chiavi derivate salvate in %s:\n%s", tmp.name, proc.stdout.strip())
     return tmp.name
 
 
@@ -208,11 +209,21 @@ def nfclassic_dump(out_mfd_abs: str, keys_dic_path: str) -> subprocess.Completed
     """
 
     proc = sh(["nfc-mfclassic", "r", "a", out_mfd_abs, keys_dic_path], check=False)
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"nfc-mfclassic failed ({proc.returncode})\n"
-            f"--- STDOUT ---\n{proc.stdout}\n--- STDERR ---\n{proc.stderr}"
-        )
+    out_combined = proc.stdout + proc.stderr
+
+    if proc.returncode != 0 or "authentication failed" in out_combined.lower():
+        m_block = re.search(r"block\s+(0x[0-9A-Fa-f]+|\d+)", out_combined, re.IGNORECASE)
+        m_sector = re.search(r"sector\s+(0x[0-9A-Fa-f]+|\d+)", out_combined, re.IGNORECASE)
+
+        if m_block:
+            block_val = int(m_block.group(1), 0)
+            sector_val = block_val // 4
+            where = f"block {block_val} (0x{block_val:02X}, sector {sector_val})"
+        elif m_sector:
+            sector_val = int(m_sector.group(1), 0)
+            where = f"sector {sector_val}"
+        else:
+            where = "sconosciuto"
 
     out_combined = proc.stdout + proc.stderr
     if "authentication failed" in out_combined.lower():
@@ -251,12 +262,6 @@ def main() -> None:
     ap.add_argument("--derive", default=None, help="Path a deriveKeys.py (opzionale)")
     ap.add_argument("--parse", default=None, help="Path a parse.py (opzionale)")
     ap.add_argument("--keys", default=None, help="Usa questo keys.dic e salta deriveKeys.py")
-    ap.add_argument(
-        "--keep-keys",
-        dest="keep_keys",
-        action="store_true",
-        help="Non cancellare il keys.dic temporaneo",
-    )
 
     ap.add_argument(
         "--master-key",
@@ -301,7 +306,13 @@ def main() -> None:
         default=8.0,
         help="Secondi massimi per trovare l'UID con nfc-list (default: 8.0)",
     )
+    ap.add_argument("--debug", action="store_true", help="Abilita messaggi di debug")
     args = ap.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="[%(levelname)s] %(message)s",
+    )
 
     guide_path = Path(args.guide)
     derive_py_abs: str | None = None
@@ -387,8 +398,12 @@ def main() -> None:
         if not keys_path.exists():
             print(f"[ERR] keys.dic non trovato: {keys_path}", file=sys.stderr)
             sys.exit(2)
+        keys_dic_abs = str(keys_path)
+    else:
+        print("[INFO] Derivo chiavi dall'UID…")
+        keys_dic_abs = derive_keys(uid_hex, derive_py_abs)  # type: ignore[arg-type]
+        print(f"[INFO] keys.dic salvato: {keys_dic_abs}")
 
-    temp_keys = None
     try:
         if args.keys:
             keys_dic_abs = str(keys_path)
@@ -401,7 +416,7 @@ def main() -> None:
                 show=args.show_keys,
             )
             temp_keys = keys_dic_abs
-
+            
         print(f"[INFO] Dump MIFARE → {mfd_path.name}")
         proc = nfclassic_dump(str(mfd_path), keys_dic_abs)
         if not mfd_path.exists():
@@ -424,12 +439,6 @@ def main() -> None:
     except Exception as e:
         print(f"[ERR] Operazione fallita: {e}", file=sys.stderr)
         sys.exit(1)
-    finally:
-        if temp_keys and not args.keep_keys:
-            try:
-                os.remove(temp_keys)
-            except Exception:
-                pass
 
 if __name__ == "__main__":
     try:

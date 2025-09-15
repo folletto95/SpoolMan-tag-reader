@@ -1,6 +1,7 @@
 # Bambu NFC Reader
 
-Un tool per **leggere e catalogare le tag NFC delle bobine BambuLab** usando un **Raspberry Pi + PN532 USB**.
+Tool per **leggere e catalogare le tag NFC delle bobine BambuLab** usando le
+utility di **libnfc** (`nfc-list`, `nfc-mfclassic`).
 
 ## 🚀 Setup
 
@@ -16,40 +17,39 @@ Un tool per **leggere e catalogare le tag NFC delle bobine BambuLab** usando un 
    source .venv/bin/activate
    ```
 
-3. Installa le dipendenze:
+3. Installa le dipendenze Python:
    ```bash
    pip install -r requirements.txt
    ```
 
-4. Collega il PN532 al Raspberry (via USB o adattatore seriale).
+4. Assicurati che nel sistema siano presenti gli strumenti di `libnfc`
+   (`nfc-list`, `nfc-mfclassic`).
+
+5. Collega il lettore NFC (es. PN532 USB) al dispositivo.
 
 ## ▶️ Uso
 
-Esegui il lettore (rilevamento automatico):
+Esegui il lettore (scarica automaticamente la guida se manca):
 ```bash
 python src/reader.py
 ```
-Il programma proverà a individuare un lettore NFC collegato via USB o
-seriale (`/dev/ttyUSB*` o `/dev/ttyACM*`).
+Il programma esegue `nfc-list` per rilevare il tag, calcola le chiavi con
+`deriveKeys.py` e crea un dump con `nfc-mfclassic`; infine lo interpreta con
+`parse.py` producendo un file JSON.
 
+Opzioni utili:
 
-Per specificare manualmente il dispositivo:
-```bash
-python src/reader.py --device 'tty:USB0:pn532'
-```
+* `--guide DIR`  – percorso della cartella `RFID-Tag-Guide` (default:
+  `./RFID-Tag-Guide`). Se non esiste viene scaricata automaticamente.
+* `--no-auto-fetch` – non scaricare la guida automaticamente.
+* `--no-parse` – genera solo il dump `.mfd` senza eseguire `parse.py`.
+* `--only-parse FILE.mfd` – salta la lettura e interpreta un dump esistente.
 
-In alternativa puoi impostare la variabile d'ambiente `NFC_DEVICE`:
-```bash
-export NFC_DEVICE='tty:USB0:pn532'
-python src/reader.py
+Appoggia una bobina Bambu sul lettore. Verranno generati:
 
-```
-
-Appoggia una bobina Bambu sul lettore. Verrà generato un file JSON con:
-
-- UID della tag
-- Dump di tutti i blocchi disponibili
-- Decodifica dei campi noti (spool_id, materiale, colore, peso)
+- `bambu_tag_<timestamp>.mfd` con i dati grezzi della tag
+- `bambu_tag_<timestamp>.json` con la decodifica dei campi noti (spool_id,
+  materiale, colore, peso)
 
 ### Dump con Proxmark3
 
@@ -59,27 +59,20 @@ Per usare un Proxmark3 al posto del lettore PN532:
 python src/tag_dump_pm3.py -o dumps/
 ```
 
-Il comando deriva automaticamente le chiavi della tag e salva i file `.bin` e `.json` nella cartella indicata. Aggiungi `--backdoor` se vuoi usare la chiave di backdoor senza libreria crittografica.
+Il comando deriva automaticamente le chiavi della tag e salva i file `.bin` e
+`.json` nella cartella indicata. Aggiungi `--backdoor` se vuoi usare la chiave
+di backdoor senza libreria crittografica.
 
 
 ## 📂 Output
 
-Oltre al file JSON vengono generati:
+Il lettore produce:
 
-- `bambu_tag_YYYYMMDD_HHMMSS.bin` con i dati grezzi concatenati della tag
-- `bambu_tag_YYYYMMDD_HHMMSS.dump.txt` con l'output testuale di `dump()` del
-  lettore NFC
+- `bambu_tag_YYYYMMDD_HHMMSS.mfd` con il dump completo della tag
+- `bambu_tag_YYYYMMDD_HHMMSS.json` con l'interpretazione dei campi principali
 
-Questi file aiutano a verificare eventuali problemi di lettura o decodifica.
-
-Per decodificare ulteriormente il file `.bin`, utilizza lo script dedicato:
-
-```bash
-python src/bambutag_parse.py bambu_tag_YYYYMMDD_HHMMSS.bin
-```
-
-Lo script stamperà a schermo le informazioni interpretate dalla tag, come tipo
-di materiale, colore e peso della bobina.
+I file possono essere usati per analisi successive o per importare i dati in
+altre applicazioni.
 
 
 Esempio `bambu_tag_20250910_123456.json`:

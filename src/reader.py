@@ -169,11 +169,31 @@ def ensure_guide_repo(guide_dir: Path, auto_fetch: bool = True) -> tuple[str, st
     return str(derive_py.resolve()), str(parse_py.resolve())
 
 
-def derive_keys(uid_hex: str, derive_py_abs: str) -> str:
-    """Run ``deriveKeys.py`` and save keys to ``keys_<UID>.dic``."""
+def derive_keys(
+    uid_hex: str,
+    derive_py_abs: str,
+    master_key: str | None = None,
+    show: bool = False,
+) -> str:
+    """Run ``deriveKeys.py`` and write keys to a temporary file.
 
-    proc = sh(["python3", derive_py_abs, uid_hex], check=True)
-    tmp = tempfile.NamedTemporaryFile(prefix="keys_", suffix=".dic", delete=False, mode="w")
+    When ``show`` is True, the derived keys are printed to stdout for debug.
+    ``master_key`` allows overriding the default master secret used by
+    ``deriveKeys.py``.
+    """
+
+    cmd = ["python3", derive_py_abs, uid_hex]
+    if master_key:
+        cmd.extend(["--master-key", master_key])
+
+    proc = sh(cmd, check=True)
+
+    if show:
+        print("[DBG] Chiavi derivate:\n" + proc.stdout.strip())
+
+    tmp = tempfile.NamedTemporaryFile(
+        prefix="keys_", suffix=".dic", delete=False, mode="w"
+    )
     tmp.write(proc.stdout)
     tmp.close()
     logging.debug("Chiavi derivate salvate in %s:\n%s", tmp.name, proc.stdout.strip())
@@ -184,7 +204,8 @@ def nfclassic_dump(out_mfd_abs: str, keys_dic_path: str) -> subprocess.Completed
     """Dump the tag with ``nfc-mfclassic`` and return the process.
 
     ``nfc-mfclassic`` may report "authentication failed" while still exiting
-    with status 0. Detect this case to provide a clearer error message.
+    with status 0. Detect this case to provide a clearer error message and, when
+    possible, indicate the failing block/sector.
     """
 
     proc = sh(["nfc-mfclassic", "r", "a", out_mfd_abs, keys_dic_path], check=False)
@@ -204,9 +225,19 @@ def nfclassic_dump(out_mfd_abs: str, keys_dic_path: str) -> subprocess.Completed
         else:
             where = "sconosciuto"
 
+    out_combined = proc.stdout + proc.stderr
+    if "authentication failed" in out_combined.lower():
+        m = re.search(r"authentication failed for block 0x([0-9a-fA-F]+)", out_combined)
+        if m:
+            blk = int(m.group(1), 16)
+            sector = blk // 4
+            msg = (
+                f"Autenticazione al tag fallita (blocco 0x{blk:02X}, settore {sector}).\n"
+            )
+        else:
+            msg = "Autenticazione al tag fallita (chiavi errate?).\n"
         raise RuntimeError(
-            f"Autenticazione al tag fallita su {where}.\n"
-            f"--- STDOUT ---\n{proc.stdout}\n--- STDERR ---\n{proc.stderr}"
+            msg + f"--- STDOUT ---\n{proc.stdout}\n--- STDERR ---\n{proc.stderr}"
         )
 
     return proc
@@ -231,6 +262,19 @@ def main() -> None:
     ap.add_argument("--derive", default=None, help="Path a deriveKeys.py (opzionale)")
     ap.add_argument("--parse", default=None, help="Path a parse.py (opzionale)")
     ap.add_argument("--keys", default=None, help="Usa questo keys.dic e salta deriveKeys.py")
+
+    ap.add_argument(
+        "--master-key",
+        dest="master_key",
+        default=None,
+        help="Master key esadecimale (32 hex) per deriveKeys.py",
+    )
+    ap.add_argument(
+        "--show-keys",
+        dest="show_keys",
+        action="store_true",
+        help="Stampa a video le chiavi derivate (debug)",
+    )
 
     ap.add_argument(
         "--no-parse",
@@ -361,6 +405,18 @@ def main() -> None:
         print(f"[INFO] keys.dic salvato: {keys_dic_abs}")
 
     try:
+        if args.keys:
+            keys_dic_abs = str(keys_path)
+        else:
+            print("[INFO] Derivo chiavi dall'UID…")
+            keys_dic_abs = derive_keys(
+                uid_hex,
+                derive_py_abs,  # type: ignore[arg-type]
+                master_key=args.master_key,
+                show=args.show_keys,
+            )
+            temp_keys = keys_dic_abs
+            
         print(f"[INFO] Dump MIFARE → {mfd_path.name}")
         proc = nfclassic_dump(str(mfd_path), keys_dic_abs)
         if not mfd_path.exists():

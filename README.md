@@ -44,6 +44,9 @@ Opzioni utili:
 * `--no-auto-fetch` – non scaricare la guida automaticamente.
 * `--no-parse` – genera solo il dump `.mfd` senza eseguire `parse.py`.
 * `--only-parse FILE.mfd` – salta la lettura e interpreta un dump esistente.
+* `--master-key HEX` – usa una master key alternativa (32 caratteri esadecimali) per
+  testare chiavi diverse.
+* `--show-keys` – stampa a video le chiavi derivate (solo debug).
 
 Appoggia una bobina Bambu sul lettore. Verranno generati:
 

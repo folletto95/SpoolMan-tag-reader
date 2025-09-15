@@ -180,9 +180,27 @@ def derive_keys(uid_hex: str, derive_py_abs: str) -> str:
 
 
 def nfclassic_dump(out_mfd_abs: str, keys_dic_path: str) -> subprocess.CompletedProcess:
-    """Dump the tag with ``nfc-mfclassic`` and return the process."""
+    """Dump the tag with ``nfc-mfclassic`` and return the process.
 
-    return sh(["nfc-mfclassic", "r", "a", out_mfd_abs, keys_dic_path], check=True)
+    ``nfc-mfclassic`` may report "authentication failed" while still exiting
+    with status 0. Detect this case to provide a clearer error message.
+    """
+
+    proc = sh(["nfc-mfclassic", "r", "a", out_mfd_abs, keys_dic_path], check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"nfc-mfclassic failed ({proc.returncode})\n"
+            f"--- STDOUT ---\n{proc.stdout}\n--- STDERR ---\n{proc.stderr}"
+        )
+
+    out_combined = (proc.stdout + proc.stderr).lower()
+    if "authentication failed" in out_combined:
+        raise RuntimeError(
+            "Autenticazione al tag fallita (chiavi errate?).\n"
+            f"--- STDOUT ---\n{proc.stdout}\n--- STDERR ---\n{proc.stderr}"
+        )
+
+    return proc
 
 
 def parse_mfd(mfd_abs: str, parse_py_abs: str) -> str:
@@ -365,11 +383,6 @@ def main() -> None:
                 os.remove(temp_keys)
             except Exception:
                 pass
-
-    # Parse (opzionale)
-    if args.no_parse:
-        print("[INFO] parse.py disabilitato (--no-parse). Fine.")
-        sys.exit(0)
 
 if __name__ == "__main__":
     try:

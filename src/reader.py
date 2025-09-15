@@ -36,9 +36,6 @@ GUIDE_ZIP = (
     "https://github.com/Bambu-Research-Group/RFID-Tag-Guide/archive/refs/heads/main.zip"
 )
 
-HERE = Path(__file__).resolve().parent
-DEFAULT_GUIDE = (HERE.parent / "RFID-Tag-Guide")  # cambia se l'hai altrove
-
 def sh(cmd, check: bool = True) -> subprocess.CompletedProcess:
     """Run *cmd* returning the CompletedProcess.
 
@@ -182,10 +179,10 @@ def derive_keys(uid_hex: str, derive_py_abs: str) -> str:
     return tmp.name
 
 
-def nfclassic_dump(out_mfd_abs: str, keys_dic_path: str) -> None:
-    """Dump the tag with ``nfc-mfclassic``."""
+def nfclassic_dump(out_mfd_abs: str, keys_dic_path: str) -> subprocess.CompletedProcess:
+    """Dump the tag with ``nfc-mfclassic`` and return the process."""
 
-    sh(["nfc-mfclassic", "r", "a", out_mfd_abs, keys_dic_path], check=True)
+    return sh(["nfc-mfclassic", "r", "a", out_mfd_abs, keys_dic_path], check=True)
 
 
 def parse_mfd(mfd_abs: str, parse_py_abs: str) -> str:
@@ -246,6 +243,45 @@ def main() -> None:
     )
     args = ap.parse_args()
 
+    guide_path = Path(args.guide)
+    derive_py_abs: str | None = None
+    parse_py_abs: str | None = None
+
+    # Determine paths for deriveKeys.py and parse.py upfront
+    if args.only_parse:
+        if args.parse:
+            parse_py_abs = str(Path(args.parse).resolve())
+        else:
+            _, parse_py_abs = ensure_guide_repo(guide_path, auto_fetch=args.auto_fetch)
+    else:
+        if args.keys:
+            if args.parse:
+                parse_py_abs = str(Path(args.parse).resolve())
+            elif not args.no_parse:
+                _, parse_py_abs = ensure_guide_repo(guide_path, auto_fetch=args.auto_fetch)
+        else:
+            if args.derive:
+                derive_py_abs = str(Path(args.derive).resolve())
+            if args.parse:
+                parse_py_abs = str(Path(args.parse).resolve())
+            if not derive_py_abs or (not parse_py_abs and not args.no_parse):
+                d, p = ensure_guide_repo(guide_path, auto_fetch=args.auto_fetch)
+                if not derive_py_abs:
+                    derive_py_abs = d
+                if not parse_py_abs and not args.no_parse:
+                    parse_py_abs = p
+
+    # Validate existence
+    for path, name in [(derive_py_abs, "deriveKeys.py"), (parse_py_abs, "parse.py")]:
+        if path and not Path(path).exists():
+            print(f"[ERR] {name} non trovato: {path}", file=sys.stderr)
+            sys.exit(2)
+
+    if derive_py_abs:
+        print(f"[INFO] deriveKeys.py: {derive_py_abs}")
+    if parse_py_abs:
+        print(f"[INFO] parse.py: {parse_py_abs}")
+
     # Parse existing dump only
     if args.only_parse:
         mfd = Path(args.only_parse).resolve()
@@ -257,18 +293,11 @@ def main() -> None:
             print("[ERR] --only-parse e --no-parse sono incompatibili.", file=sys.stderr)
             sys.exit(2)
 
-        if args.parse:
-            parse_py_abs = str(Path(args.parse).resolve())
-        else:
-            _, parse_py_abs = ensure_guide_repo(
-                Path(args.guide), auto_fetch=args.auto_fetch
-            )
-
         outstem = args.outstem or f"bambu_tag_{timestamp()}"
         json_path = Path(f"{outstem}.json").resolve()
         print(f"[INFO] Parsing {mfd} → {json_path}")
         try:
-            js = parse_mfd(str(mfd), parse_py_abs)
+            js = parse_mfd(str(mfd), parse_py_abs)  # type: ignore[arg-type]
             json_path.write_text(js, encoding="utf-8")
             print(f"[INFO] JSON salvato in {json_path}")
             sys.exit(0)
@@ -293,21 +322,11 @@ def main() -> None:
     outstem = args.outstem or f"bambu_tag_{timestamp()}"
     mfd_path = Path(f"{outstem}.mfd").resolve()
 
-    # Prepare derive/parse
     if args.keys:
         keys_path = Path(args.keys).resolve()
         if not keys_path.exists():
             print(f"[ERR] keys.dic non trovato: {keys_path}", file=sys.stderr)
             sys.exit(2)
-        parse_py_abs = (
-            str(Path(args.parse).resolve())
-            if args.parse
-            else ensure_guide_repo(Path(args.guide), auto_fetch=args.auto_fetch)[1]
-        )
-    else:
-        derive_py_abs, parse_py_abs = ensure_guide_repo(
-            Path(args.guide), auto_fetch=args.auto_fetch
-        )
 
     temp_keys = None
     try:
@@ -315,11 +334,16 @@ def main() -> None:
             keys_dic_abs = str(keys_path)
         else:
             print("[INFO] Derivo chiavi dall'UID…")
-            keys_dic_abs = derive_keys(uid_hex, derive_py_abs)
+            keys_dic_abs = derive_keys(uid_hex, derive_py_abs)  # type: ignore[arg-type]
             temp_keys = keys_dic_abs
 
         print(f"[INFO] Dump MIFARE → {mfd_path.name}")
-        nfclassic_dump(str(mfd_path), keys_dic_abs)
+        proc = nfclassic_dump(str(mfd_path), keys_dic_abs)
+        if not mfd_path.exists():
+            raise RuntimeError(
+                f"nfc-mfclassic non ha creato il dump {mfd_path}\n"
+                f"--- STDOUT ---\n{proc.stdout}\n--- STDERR ---\n{proc.stderr}"
+            )
         print(f"[INFO] Dump salvato: {mfd_path}")
 
         if args.no_parse:
@@ -328,7 +352,7 @@ def main() -> None:
 
         json_path = Path(f"{outstem}.json").resolve()
         print(f"[INFO] Parsing → {json_path.name}")
-        js = parse_mfd(str(mfd_path), parse_py_abs)
+        js = parse_mfd(str(mfd_path), parse_py_abs)  # type: ignore[arg-type]
         json_path.write_text(js, encoding="utf-8")
         print(f"[INFO] JSON salvato: {json_path}")
 
@@ -346,23 +370,6 @@ def main() -> None:
     if args.no_parse:
         print("[INFO] parse.py disabilitato (--no-parse). Fine.")
         sys.exit(0)
-
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n[INFO] Interrotto dall'utente.")
-        sys.exit(130)
-
-    json_path = Path(f"{outstem}.json")
-    print(f"[INFO] Parsing → {json_path}")
-    try:
-        js = parse_mfd(str(mfd_path), parse_path)
-        json_path.write_text(js, encoding="utf-8")
-        print(f"[INFO] JSON salvato: {json_path}")
-    except Exception as e:
-        print(f"[ERR] parse.py fallito: {e}", file=sys.stderr)
-        sys.exit(1)
 
 if __name__ == "__main__":
     try:
